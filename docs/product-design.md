@@ -205,8 +205,8 @@ V1.0 优先实现单用户编辑闭环；组织权限和多人实时协作进入
 | 模块 | 功能范围 | 版本优先级 |
 | --- | --- | --- |
 | 通路图管理 | 新建、打开、重命名、复制、删除、保存、重新打开 | P0 |
-| 层级管理 | 树形展示、增删改、排序、移动、影响检查 | P0 |
-| 节点管理 | 增删改查、搜索定位、层级归属、样式应用、排序 | P0 |
+| 层级管理 | 树形展示、单个/批量新增、删改、排序、移动、影响检查 | P0 |
+| 节点管理 | 单个/批量新增、删改查、搜索定位、层级归属、样式应用、排序 | P0 |
 | 节点样式 | 样式 CRUD、默认样式、实时预览、引用替换 | P0 |
 | 通路管理 | 通路 CRUD、画布点选节点、有序步骤列表、排序、显示隐藏、高亮 | P0 |
 | 画布呈现 | 层级容器、节点、方向连线、自动布局、缩放、平移、适应画布 | P0 |
@@ -292,7 +292,8 @@ V1.0 优先实现单用户编辑闭环；组织权限和多人实时协作进入
 - 左侧树、画布、右侧属性保持同一选择态；
 - 工具条包含选择、框选、平移、新增节点、连接通路、自动布局、缩放与适应画布；
 - 新增/重命名优先行内完成，复杂属性进入右侧面板；
-- 表单底部固定“取消｜确定”，危险操作放入面板底部独立区域；
+- 结构面板提供批量添加：用中文/英文分号或换行分隔名称，同批层级共享上级、同批节点共享叶子层级与样式，预览确认后一次提交并可整体撤销；
+- 普通表单底部固定“取消｜确定”，危险操作放入面板底部独立区域；连接通路草稿的主要完成按钮跟随画布末节点；
 - 删除层级、节点或样式前展示依赖影响并支持撤销。
 
 #### 通路配置
@@ -301,6 +302,7 @@ V1.0 优先实现单用户编辑闭环；组织权限和多人实时协作进入
 - 画布上的候选边使用品牌色虚线，已确认通路使用实线；
 - 右侧以有序列表展示步骤序号、节点名、所属层级、拖拽手柄和移除操作；
 - 画布点选与列表编辑双向联动，顺序变化实时更新箭头；
+- 选中至少两个节点后，“完成通路”贴近最后一个节点，优先在下方出现；如会遮挡其他节点或超出画布，则自适应选择右、左或上方；
 - 退出连接模式时清理临时候选，不保留半成品。
 
 详细通路配置见文末图 4。
@@ -386,4 +388,3 @@ eyJleHRTcnZJbnRlZ1R5cGUiOiIiLCJnQ2xpZW50SWQiOiIiLCJjcmVhdG9yTmFtZSI6IueOi+aZtiIs
 eyJleHRTcnZJbnRlZ1R5cGUiOiIiLCJnQ2xpZW50SWQiOiIiLCJjcmVhdG9yTmFtZSI6IueOi+aZtiIsIm91dHB1dFR5cGUiOiJibG9jayIsImxhc3RNb2RpZmllck5hbWUiOiLnjovmmbYiLCJsYW5ndWFnZSI6InpoIiwiZGlhZ3JhbURpc3BsYXlOYW1lIjoiIiwic0ZpbGVJZCI6IiIsImF0dElkIjoiNzY4NTIzNTM4IiwiZGlhZ3JhbU5hbWUiOiJwYXRod2F5LWVkaXRvci1ib2NodWktdjEuZHJhd2lvIiwiYXNwZWN0IjoiIiwibGlua3MiOiJhdXRvIiwiY2VvTmFtZSI6IuS4muWKoeS9nOWbvndlYuW3peWFtyIsInRic3R5bGUiOiJ0b3AiLCJjYW5Db21tZW50Ijp0cnVlLCJkaWFncmFtVXJsIjoiIiwiY3N2RmlsZVVybCI6IiIsImJvcmRlciI6dHJ1ZSwibWF4U2NhbGUiOiIxIiwib3duaW5nUGFnZUlkIjo3Njg1MjM1MjksImVkaXRhYmxlIjp0cnVlLCJjZW9JZCI6NzY4NTIzNTI5LCJwYWdlSWQiOiIiLCJsYm94Ijp0cnVlLCJzZXJ2ZXJDb25maWciOnsiZW1haWxwcmV2aWV3IjoiMSJ9LCJvZHJpdmVJZCI6IiIsInJldmlzaW9uIjoyLCJtYWNyb0lkIjoiNDMxNGM5MmQtZjc2Mi00MDA3LThmOTQtNGMyMzRiMjA4MTdlIiwicHJldmlld05hbWUiOiJwYXRod2F5LWVkaXRvci1ib2NodWktdjEuZHJhd2lvLnBuZyIsImxpY2Vuc2VTdGF0dXMiOiJPSyIsInNlcnZpY2UiOiIiLCJpc1RlbXBsYXRlIjoiIiwid2lkdGgiOiIxNDAwIiwic2ltcGxlVmlld2VyIjpmYWxzZSwibGFzdE1vZGlmaWVkIjoxNzg3OTE4OTk0MDkyLCJleGNlZWRQYWdlV2lkdGgiOmZhbHNlLCJvQ2xpZW50SWQiOiIifQ==
 
 eyJleHRTcnZJbnRlZ1R5cGUiOiIiLCJnQ2xpZW50SWQiOiIiLCJjcmVhdG9yTmFtZSI6IueOi+aZtiIsIm91dHB1dFR5cGUiOiJibG9jayIsImxhc3RNb2RpZmllck5hbWUiOiLnjovmmbYiLCJsYW5ndWFnZSI6InpoIiwiZGlhZ3JhbURpc3BsYXlOYW1lIjoiIiwic0ZpbGVJZCI6IiIsImF0dElkIjoiNzY4NTIzNTQwIiwiZGlhZ3JhbU5hbWUiOiJwYXRod2F5LWNvbmZpZy1ib2NodWktdjEuZHJhd2lvIiwiYXNwZWN0IjoiIiwibGlua3MiOiJhdXRvIiwiY2VvTmFtZSI6IuS4muWKoeS9nOWbvndlYuW3peWFtyIsInRic3R5bGUiOiJ0b3AiLCJjYW5Db21tZW50Ijp0cnVlLCJkaWFncmFtVXJsIjoiIiwiY3N2RmlsZVVybCI6IiIsImJvcmRlciI6dHJ1ZSwibWF4U2NhbGUiOiIxIiwib3duaW5nUGFnZUlkIjo3Njg1MjM1MjksImVkaXRhYmxlIjp0cnVlLCJjZW9JZCI6NzY4NTIzNTI5LCJwYWdlSWQiOiIiLCJsYm94Ijp0cnVlLCJzZXJ2ZXJDb25maWciOnsiZW1haWxwcmV2aWV3IjoiMSJ9LCJvZHJpdmVJZCI6IiIsInJldmlzaW9uIjoyLCJtYWNyb0lkIjoiMjRhOGQ5MDItMzUwMi00NWEwLThlZDItMjMzYWY3OWNiNTY5IiwicHJldmlld05hbWUiOiJwYXRod2F5LWNvbmZpZy1ib2NodWktdjEuZHJhd2lvLnBuZyIsImxpY2Vuc2VTdGF0dXMiOiJPSyIsInNlcnZpY2UiOiIiLCJpc1RlbXBsYXRlIjoiIiwid2lkdGgiOiIxNDAwIiwic2ltcGxlVmlld2VyIjpmYWxzZSwibGFzdE1vZGlmaWVkIjoxNzg3OTE4OTk1NzEzLCJleGNlZWRQYWdlV2lkdGgiOmZhbHNlLCJvQ2xpZW50SWQiOiIifQ==
-

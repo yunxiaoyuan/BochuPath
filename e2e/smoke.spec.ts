@@ -87,11 +87,15 @@ test("shows an arrowed draft edge and clears the complete draft with Escape", as
   page,
 }) => {
   await page.goto("/diagrams/diagram_demo/edit");
-  await page.getByRole("button", { name: /连接/ }).click();
+  await page.getByRole("tab", { name: "通路" }).click();
+  await page.getByRole("button", { name: /新增通路/ }).click();
   await expect(page.getByRole("heading", { name: "新建通路" })).toBeVisible();
   await expect(page.getByRole("button", { name: "删除通路" })).toHaveCount(0);
 
   await page.getByRole("button", { name: /需求确认，位于 需求层/ }).click();
+  await expect(
+    page.getByRole("button", { name: "完成通路", exact: true }),
+  ).toHaveCount(0);
   await page.getByRole("button", { name: /方案评审，位于 方案层/ }).click();
   const draft = page.locator(".draft-edge .react-flow__edge-path");
   await expect(draft).toHaveCount(1);
@@ -102,6 +106,7 @@ test("shows an arrowed draft edge and clears the complete draft with Escape", as
     ),
   ).not.toBe("");
   await expect(page.getByText("已选 2 个")).toBeVisible();
+  await expectPathwayFinishNearLastNode(page, "node_solution");
 
   await page.keyboard.press("Escape");
   await expect(page.locator(".draft-edge")).toHaveCount(0);
@@ -110,7 +115,9 @@ test("shows an arrowed draft edge and clears the complete draft with Escape", as
   await page.getByRole("button", { name: /连接/ }).click();
   await page.getByRole("button", { name: /需求确认，位于 需求层/ }).click();
   await page.getByRole("button", { name: /方案评审，位于 方案层/ }).click();
-  await page.getByRole("button", { name: "完成", exact: true }).click();
+  await page
+    .getByRole("button", { name: "完成通路", exact: true })
+    .click();
   await expect(page.getByRole("heading", { name: "通路属性" })).toBeVisible();
   await expect(page.locator(".react-flow__edge-path")).toHaveCount(3);
   await expect(page.getByLabel("撤销")).toBeEnabled();
@@ -139,6 +146,24 @@ test("creates and deletes a node through undoable domain commands", async ({
   await expect(
     page.getByRole("treeitem", { name: "待删除测试节点" }),
   ).toBeVisible();
+});
+
+test("batch adds ordered nodes and undoes them together", async ({ page }) => {
+  await page.goto("/diagrams/diagram_demo/edit");
+  await page.getByTitle("批量添加层级或节点").click();
+  await expect(page.getByRole("heading", { name: "批量添加" })).toBeVisible();
+
+  await page
+    .getByLabel("节点名称列表")
+    .fill("需求提出；需求分析;\n需求归档");
+  await expect(page.getByText("将按顺序添加 3 个节点")).toBeVisible();
+  await page.getByRole("button", { name: "确定" }).click();
+
+  for (const name of ["需求提出", "需求分析", "需求归档"])
+    await expect(page.getByRole("treeitem", { name })).toBeVisible();
+  await page.getByLabel("撤销").click();
+  for (const name of ["需求提出", "需求分析", "需求归档"])
+    await expect(page.getByRole("treeitem", { name })).toHaveCount(0);
 });
 
 test("offers and restores a newer local draft after reload", async ({ page }) => {
@@ -176,4 +201,64 @@ async function expectCanvasInsideStage(page: Page): Promise<void> {
       stage!.y + stage!.height - 23,
     );
   }
+}
+
+async function expectPathwayFinishNearLastNode(
+  page: Page,
+  lastNodeId: string,
+): Promise<void> {
+  const toolbar = page.locator(".pathway-finish-toolbar");
+  const action = page.getByRole("button", { name: "完成通路", exact: true });
+  await expect(toolbar).toBeVisible();
+  await expect(action).toBeVisible();
+  await expect(toolbar).toHaveAttribute(
+    "data-placement",
+    /bottom|right|left|top/,
+  );
+
+  const actionBox = await action.boundingBox();
+  const lastNodeBox = await page
+    .locator(`.react-flow__node-business[data-id="${lastNodeId}"]`)
+    .boundingBox();
+  expect(actionBox).not.toBeNull();
+  expect(lastNodeBox).not.toBeNull();
+  expect(rectangleGap(actionBox!, lastNodeBox!)).toBeLessThanOrEqual(14);
+
+  const otherNodes = page.locator(
+    `.react-flow__node-business:not([data-id="${lastNodeId}"])`,
+  );
+  for (const node of await otherNodes.all()) {
+    const box = await node.boundingBox();
+    expect(box).not.toBeNull();
+    expect(overlaps(actionBox!, box!)).toBe(false);
+  }
+}
+
+function rectangleGap(
+  left: { x: number; y: number; width: number; height: number },
+  right: { x: number; y: number; width: number; height: number },
+): number {
+  const horizontal = Math.max(
+    0,
+    right.x - (left.x + left.width),
+    left.x - (right.x + right.width),
+  );
+  const vertical = Math.max(
+    0,
+    right.y - (left.y + left.height),
+    left.y - (right.y + right.height),
+  );
+  return Math.hypot(horizontal, vertical);
+}
+
+function overlaps(
+  left: { x: number; y: number; width: number; height: number },
+  right: { x: number; y: number; width: number; height: number },
+): boolean {
+  return !(
+    left.x + left.width <= right.x ||
+    right.x + right.width <= left.x ||
+    left.y + left.height <= right.y ||
+    right.y + right.height <= left.y
+  );
 }

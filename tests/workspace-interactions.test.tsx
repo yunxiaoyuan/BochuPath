@@ -89,4 +89,61 @@ describe("workspace command transactions and unified selection", () => {
       "true",
     );
   });
+
+  it("previews and commits a node batch as one undoable command", async () => {
+    const user = userEvent.setup();
+    const onCreateHandled = vi.fn();
+    render(
+      <Inspector
+        mode="edit"
+        createKind="batch"
+        onCreateHandled={onCreateHandled}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await user.type(
+      screen.getByLabelText("节点名称列表"),
+      "需求提出；需求分析;\n需求归档",
+    );
+    expect(screen.getByText("将按顺序添加 3 个节点")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "确定" }));
+
+    expect(onCreateHandled).toHaveBeenCalledOnce();
+    expect(
+      useEditorStore
+        .getState()
+        .diagram?.nodes.slice(-3)
+        .map((node) => node.name),
+    ).toEqual(["需求提出", "需求分析", "需求归档"]);
+    expect(useEditorStore.getState().history.past).toHaveLength(1);
+
+    act(() => useEditorStore.getState().undo());
+    expect(useEditorStore.getState().diagram?.nodes).toHaveLength(3);
+  });
+
+  it("switches the batch form to layers and preserves their input order", async () => {
+    const user = userEvent.setup();
+    render(
+      <Inspector
+        mode="edit"
+        createKind="batch"
+        onCreateHandled={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText("对象类型"), "layer");
+    await user.type(screen.getByLabelText("层级名称列表"), "运营层；治理层");
+    expect(screen.getByText("将按顺序添加 2 个层级")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "确定" }));
+
+    expect(
+      useEditorStore
+        .getState()
+        .diagram?.layers.slice(-2)
+        .map((layer) => layer.name),
+    ).toEqual(["运营层", "治理层"]);
+    expect(useEditorStore.getState().history.past).toHaveLength(1);
+  });
 });

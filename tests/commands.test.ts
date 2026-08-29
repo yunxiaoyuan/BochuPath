@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankDiagram, createDemoDiagram } from '../src/domain/seed';
-import { createLayer, createNode, createNodeStyle, createPathway, deleteNode, deleteNodeStyleWithReplacement, setDefaultStyle } from '../src/editor/commands';
+import { parseBatchNames } from '../src/editor/batch-input';
+import { createLayer, createLayersBatch, createNode, createNodesBatch, createNodeStyle, createPathway, deleteNode, deleteNodeStyleWithReplacement, setDefaultStyle } from '../src/editor/commands';
 
 describe('domain commands', () => {
   it('creates a child and migrates existing nodes atomically', () => {
@@ -22,5 +23,33 @@ describe('domain commands', () => {
   });
   it('keeps exactly one system default style', () => {
     const diagram = setDefaultStyle(createDemoDiagram(), 'style_review'); expect(diagram.nodeStyles.filter((x) => x.isDefault)).toHaveLength(1); expect(diagram.nodeStyles.find((x) => x.isDefault)?.id).toBe('style_review');
+  });
+  it('parses Chinese/English semicolons and line breaks in order', () => {
+    expect(parseBatchNames(' 需求层；方案层;\n交付层\n\n')).toEqual(['需求层', '方案层', '交付层']);
+  });
+  it('creates ordered layers and nodes as atomic batches', () => {
+    let diagram = createBlankDiagram('批量创建');
+    diagram = createLayersBatch(diagram, { names: ['需求层', '方案层', '交付层'], parentId: null });
+    expect(diagram.layers.map((layer) => [layer.name, layer.order])).toEqual([
+      ['需求层', 10],
+      ['方案层', 20],
+      ['交付层', 30],
+    ]);
+    const target = diagram.layers[0]!;
+    diagram = createNodesBatch(diagram, {
+      names: ['需求提出', '需求确认', '需求归档'],
+      layerId: target.id,
+      styleId: diagram.nodeStyles[0]!.id,
+    });
+    expect(diagram.nodes.map((node) => [node.name, node.order])).toEqual([
+      ['需求提出', 10],
+      ['需求确认', 20],
+      ['需求归档', 30],
+    ]);
+  });
+  it('rejects a duplicate layer batch without mutating the source diagram', () => {
+    const diagram = createBlankDiagram('批量冲突');
+    expect(() => createLayersBatch(diagram, { names: ['业务层', '业务层'], parentId: null })).toThrow('LAYER_SIBLING_NAME_DUPLICATE');
+    expect(diagram.layers).toHaveLength(0);
   });
 });

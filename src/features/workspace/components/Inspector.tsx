@@ -28,7 +28,9 @@ import {
 } from "../../../domain/selectors";
 import {
   createLayer,
+  createLayersBatch,
   createNode,
+  createNodesBatch,
   createNodeStyle,
   createPathway,
   deleteLayerWithMigration,
@@ -46,6 +48,7 @@ import {
   updateNodeStyle,
   updatePathway,
 } from "../../../editor/commands";
+import { parseBatchNames } from "../../../editor/batch-input";
 import { useEditorStore } from "../../../editor/store";
 import type { CreateKind } from "../WorkspacePage";
 
@@ -79,6 +82,8 @@ export function Inspector({
     content = <StyleForm onDone={onCreateHandled} />;
   else if (createKind === "pathway")
     content = <PathwayForm onDone={onCreateHandled} />;
+  else if (createKind === "batch")
+    content = <BatchCreateForm onDone={onCreateHandled} />;
   else if (selection?.kind === "layer")
     content = (
       <LayerForm
@@ -132,6 +137,7 @@ export function Inspector({
 
 function title(create: CreateKind, selection?: string, tool?: string): string {
   if (tool === "connectPathway") return "新建通路";
+  if (create === "batch") return "批量添加";
   if (create)
     return `新建${({ layer: "层级", node: "节点", nodeStyle: "样式", pathway: "通路" } as const)[create]}`;
   return (
@@ -249,6 +255,222 @@ function DiagramForm({ mode }: { mode: EditorMode }) {
       </div>
       {issues.length > 0 && <IssueList />}
       <FormFooter onCancel={reset} />
+    </form>
+  );
+}
+
+function BatchCreateForm({ onDone }: { onDone: () => void }) {
+  const diagram = useEditorStore((s) => s.diagram)!;
+  const selection = useEditorStore((s) => s.selection);
+  const execute = useEditorStore((s) => s.execute);
+  const select = useEditorStore((s) => s.select);
+  const leaves = leafLayers(diagram);
+  const contextualLayerId =
+    selection?.kind === "layer"
+      ? selection.id
+      : selection?.kind === "node"
+        ? diagram.nodes.find((node) => node.id === selection.id)?.layerId
+        : undefined;
+  const [objectKind, setObjectKind] = useState<"node" | "layer">("node");
+  const [rawNames, setRawNames] = useState("");
+  const [parentId, setParentId] = useState(
+    selection?.kind === "layer" ? selection.id : "",
+  );
+  const [layerId, setLayerId] = useState(
+    contextualLayerId && isLeafLayer(diagram, contextualLayerId)
+      ? contextualLayerId
+      : (leaves[0]?.id ?? ""),
+  );
+  const [styleId, setStyleId] = useState(
+    diagram.nodeStyles.find((style) => style.isDefault)?.id ??
+      diagram.nodeStyles[0]?.id ??
+      "",
+  );
+  const names = useMemo(() => parseBatchNames(rawNames), [rawNames]);
+  const maxNameLength = objectKind === "layer" ? 40 : 80;
+  const tooLongNames = names.filter((name) => name.length > maxNameLength);
+  const duplicateLayerNames = useMemo(() => {
+    if (objectKind !== "layer") return [];
+    const occupied = new Set(
+      diagram.layers
+        .filter((layer) => layer.parentId === (parentId || null))
+        .map((layer) => layer.name.trim().toLocaleLowerCase()),
+    );
+    const conflicts = new Set<string>();
+    names.forEach((name) => {
+      const normalized = name.toLocaleLowerCase();
+      if (occupied.has(normalized)) conflicts.add(name);
+      occupied.add(normalized);
+    });
+    return [...conflicts];
+  }, [diagram.layers, names, objectKind, parentId]);
+  const missingTarget =
+    objectKind === "node" && (!layerId || !styleId || !leaves.length);
+  const invalid =
+    !names.length ||
+    tooLongNames.length > 0 ||
+    duplicateLayerNames.length > 0 ||
+    missingTarget;
+  const affectedParentNodes = parentId
+    ? diagram.nodes.filter((node) => node.layerId === parentId)
+    : [];
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (invalid) return;
+    const before = new Set(
+      objectKind === "layer"
+        ? diagram.layers.map((item) => item.id)
+        : diagram.nodes.map((item) => item.id),
+    );
+    const ok = execute(
+      `批量添加 ${names.length} 个${objectKind === "layer" ? "层级" : "节点"}`,
+      (current) =>
+        objectKind === "layer"
+          ? createLayersBatch(current, {
+              names,
+              parentId: parentId || null,
+            })
+          : createNodesBatch(current, { names, layerId, styleId }),
+    );
+    if (!ok) return;
+    const current = useEditorStore.getState().diagram;
+    const created =
+      objectKind === "layer"
+        ? current?.layers.filter((item) => !before.has(item.id)).at(-1)
+        : current?.nodes.filter((item) => !before.has(item.id)).at(-1);
+    if (created)
+      select(
+        objectKind === "layer"
+          ? { kind: "layer", id: created.id }
+          : { kind: "node", id: created.id },
+      );
+    onDone();
+  };
+
+  return (
+    <form className="property-form" onSubmit={submit}>
+      <p className="inline-info">
+        同一批对象共享归属设置，并追加在已有对象之后；输入顺序就是显示顺序。
+      </p>
+      <Field label="对象类型" required>
+        <select
+          value={objectKind}
+          onChange={(event) =>
+            setObjectKind(event.target.value as "node" | "layer")
+          }
+        >
+          <option value="node">节点</option>
+          <option value="layer">层级</option>
+        </select>
+      </Field>
+      {objectKind === "layer" ? (
+        <Field label="上级层级">
+          <select
+            value={parentId}
+            onChange={(event) => setParentId(event.target.value)}
+          >
+            <option value="">顶层</option>
+            {diagram.layers.map((layer) => (
+              <option key={layer.id} value={layer.id}>
+                {fullLayerPath(diagram, layer.id)}
+              </option>
+            ))}
+          </select>
+        </Field>
+      ) : (
+        <>
+          {!leaves.length && (
+            <p className="inline-warning">请先创建层级，节点只能属于叶子层级。</p>
+          )}
+          <Field label="所属叶子层级" required>
+            <select
+              required
+              value={layerId}
+              onChange={(event) => setLayerId(event.target.value)}
+            >
+              {diagram.layers.map((layer) => (
+                <option
+                  key={layer.id}
+                  value={layer.id}
+                  disabled={!isLeafLayer(diagram, layer.id)}
+                >
+                  {fullLayerPath(diagram, layer.id)}
+                  {!isLeafLayer(diagram, layer.id) ? "（不可选）" : ""}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="节点样式" required>
+            <select
+              required
+              value={styleId}
+              onChange={(event) => setStyleId(event.target.value)}
+            >
+              {diagram.nodeStyles.map((style) => (
+                <option key={style.id} value={style.id}>
+                  {style.name}
+                  {style.isDefault ? "（默认）" : ""}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </>
+      )}
+      <Field
+        label={objectKind === "layer" ? "层级名称列表" : "节点名称列表"}
+        required
+      >
+        <textarea
+          autoFocus
+          required
+          rows={5}
+          value={rawNames}
+          onChange={(event) => setRawNames(event.target.value)}
+          placeholder={
+            objectKind === "layer"
+              ? "需求层；方案层；交付层"
+              : "需求确认；方案评审；交付验收"
+          }
+        />
+        <small>
+          支持中文分号“；”、英文分号“;”或换行；连续分隔符和空白项会忽略。
+        </small>
+      </Field>
+      {affectedParentNodes.length > 0 && objectKind === "layer" && (
+        <p className="inline-warning">
+          该上级已有 {affectedParentNodes.length} 个节点；提交后会一次迁入首个新层级
+          {names[0] ? `“${names[0]}”` : ""}。
+        </p>
+      )}
+      {tooLongNames.length > 0 && (
+        <p className="field-error">
+          名称长度不能超过 {maxNameLength} 个字符：{tooLongNames.join("、")}
+        </p>
+      )}
+      {duplicateLayerNames.length > 0 && (
+        <p className="field-error">
+          同一上级下层级名称不能重复：{duplicateLayerNames.join("、")}
+        </p>
+      )}
+      <section className="batch-preview" aria-live="polite">
+        <strong>
+          {names.length
+            ? `将按顺序添加 ${names.length} 个${objectKind === "layer" ? "层级" : "节点"}`
+            : "输入后将在这里预览"}
+        </strong>
+        {names.length > 0 && (
+          <ol className="batch-preview-list">
+            {names.map((name, index) => (
+              <li key={`${name}-${index}`}>
+                <b>{index + 1}</b>
+                <span>{name}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+      <FormFooter onCancel={onDone} disabled={invalid} />
     </form>
   );
 }
@@ -1165,10 +1387,14 @@ function DraftPathwayForm() {
           </select>
         </Field>
       </div>
-      <FormFooter
-        onCancel={() => setTool("select")}
-        disabled={draft.nodeIds.length < 2}
-      />
+      <div className="form-footer draft-form-footer">
+        <small>
+          选满两个节点后，请在最后一个节点旁完成；也可在画布按 Enter。
+        </small>
+        <button type="button" onClick={() => setTool("select")}>
+          取消
+        </button>
+      </div>
     </form>
   );
 }

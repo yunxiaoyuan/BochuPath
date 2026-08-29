@@ -79,6 +79,13 @@ export function ObjectPanel({ mode, onCreate, onClose }: Props) {
               ＋ 节点
             </button>
             <button onClick={() => onCreate("layer")}>＋ 层级</button>
+            <button
+              className="batch-create-button"
+              onClick={() => onCreate("batch")}
+              title="批量添加层级或节点"
+            >
+              批量
+            </button>
           </>
         )}
         {mode === "edit" && tab === "pathways" && (

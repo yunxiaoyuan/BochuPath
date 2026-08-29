@@ -12,6 +12,13 @@ test("light and dark edit workspaces have no automatically detectable WCAG A/AA 
     .analyze();
   expect(lightResult.violations).toEqual([]);
 
+  await page.getByTitle("批量添加层级或节点").click();
+  await page.getByLabel("节点名称列表").fill("需求提出；需求分析");
+  const batchResult = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+    .analyze();
+  expect(batchResult.violations).toEqual([]);
+
   await page.getByLabel("切换到深色主题").click();
   await page.waitForTimeout(200);
   const darkResult = await new AxeBuilder({ page })

@@ -7,7 +7,13 @@ import { ObjectPanel } from "./components/ObjectPanel";
 import { PathwayCanvas } from "./components/PathwayCanvas";
 import { Inspector } from "./components/Inspector";
 
-export type CreateKind = "layer" | "node" | "nodeStyle" | "pathway" | null;
+export type CreateKind =
+  | "layer"
+  | "node"
+  | "nodeStyle"
+  | "pathway"
+  | "batch"
+  | null;
 interface Props {
   mode: EditorMode;
   theme: "light" | "dark";
@@ -255,7 +261,12 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
         {leftOpen && (
           <ObjectPanel
             mode={mode}
-            onCreate={setCreateKind}
+            onCreate={(kind) => {
+              if (kind === "pathway") {
+                setCreateKind(null);
+                state.setTool("connectPathway");
+              } else setCreateKind(kind);
+            }}
             onClose={() => setLeftOpen(false)}
           />
         )}

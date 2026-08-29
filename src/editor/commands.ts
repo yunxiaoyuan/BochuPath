@@ -26,6 +26,23 @@ export function createLayer(diagram: Diagram, input: LayerInput): Diagram {
   });
 }
 
+export interface BatchLayerInput { names: string[]; parentId: string | null }
+export function createLayersBatch(diagram: Diagram, input: BatchLayerInput): Diagram {
+  const names = input.names.map((name) => name.trim()).filter(Boolean);
+  if (!names.length || names.some((name) => name.length > 40)) fail('FIELD_INVALID', 'names');
+  if (input.parentId && !diagram.layers.some((x) => x.id === input.parentId)) fail('REFERENCE_NOT_FOUND', 'parentId');
+  return commit(diagram, (next) => {
+    let order = Math.max(0, ...next.layers.filter((x) => x.parentId === input.parentId).map((x) => x.order)) + 10;
+    const createdIds = names.map((name) => {
+      const id = newId('layer');
+      next.layers.push({ id, parentId: input.parentId, name, order });
+      order += 10;
+      return id;
+    });
+    if (input.parentId) next.nodes.filter((node) => node.layerId === input.parentId).forEach((node) => { node.layerId = createdIds[0]!; });
+  });
+}
+
 export function updateLayer(diagram: Diagram, id: string, input: LayerInput): Diagram {
   const name = input.name.trim(); if (!name || name.length > 40) fail('FIELD_INVALID', 'name');
   return commit(diagram, (next) => {
@@ -52,6 +69,20 @@ export interface NodeInput { name: string; layerId: string; styleId: string; des
 export function createNode(diagram: Diagram, input: NodeInput): Diagram {
   validateNodeInput(diagram, input);
   return commit(diagram, (next) => { next.nodes.push({ id: newId('node'), name: input.name.trim(), layerId: input.layerId, styleId: input.styleId, description: input.description?.trim() || undefined, decompositionItems: cleanItems(input.decompositionItems), order: input.order ?? next.nodes.filter((x) => x.layerId === input.layerId).length * 10 + 10 }); });
+}
+
+export interface BatchNodeInput { names: string[]; layerId: string; styleId: string }
+export function createNodesBatch(diagram: Diagram, input: BatchNodeInput): Diagram {
+  const names = input.names.map((name) => name.trim()).filter(Boolean);
+  if (!names.length) fail('FIELD_INVALID', 'names');
+  names.forEach((name) => validateNodeInput(diagram, { name, layerId: input.layerId, styleId: input.styleId }));
+  return commit(diagram, (next) => {
+    let order = Math.max(0, ...next.nodes.filter((x) => x.layerId === input.layerId).map((x) => x.order)) + 10;
+    names.forEach((name) => {
+      next.nodes.push({ id: newId('node'), name, layerId: input.layerId, styleId: input.styleId, decompositionItems: [], order });
+      order += 10;
+    });
+  });
 }
 
 export function updateNode(diagram: Diagram, id: string, input: NodeInput): Diagram {
