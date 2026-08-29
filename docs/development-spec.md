@@ -398,10 +398,13 @@ function deriveEdges(pathway: Pathway): RenderEdge[] {
 3. 每个叶子层级生成一个泳道带；父层级容器跨越其全部后代泳道；
 4. 节点按 `layerId` 分组，再按 `order,id` 稳定排序；
 5. 在泳道中根据 `nodeWidth/nodeMinHeight/nodeGap` 排列节点；节点高度由名称和拆解文本测量，但在同一行对齐；
+   - 布局接收实际画布宽高作为派生输入，在 16:9 等宽屏和密集数据下枚举紧凑节点宽度、间距与行列容量；优先保持同层单行，通过缩窄节点和按文字换行增高保证内容可读，只有单行投影缩放低于可读性阈值时才允许自动换行；
+   - 自动换行不得修改对象 `order`；用户拖动只改变同级/同层 `order`，不持久化坐标；
 6. TB 模式从上到下排列泳道，LR 模式从左到右排列；父层标题区固定，不与节点重叠；
 7. 生成节点锚点后再派生并路由连线，优先走正交线，箭头指向目标步骤；
 8. 计算完整包围盒并支持“适应画布”；
 9. 同一输入必须输出相同坐标，新增无关节点不能随机打乱其他层级；
+   - 已经通过拖动调整的对象顺序必须由 `order` 保持；新增层级或节点默认追加，不能重置既有顺序；
 10. 布局失败时回退到简单网格，不得白屏。
 
 若使用 ELK，只允许在叶子泳道范围内辅助排布或提供路由提示；超过 200 个节点时应放入 Web Worker，期间显示“正在重新布局”，仍允许查看和平移。
@@ -436,8 +439,8 @@ interface PathwayDraft {
 
 ```text
 createDiagram / renameDiagram / duplicateDiagram / deleteDiagram
-createLayer / createLayersBatch / updateLayer / moveLayer / deleteLayerWithMigration
-createNode / createNodesBatch / updateNode / duplicateNode / deleteNode / replacePathwayNode
+createLayer / createLayersBatch / updateLayer / moveLayer / reorderLayer / deleteLayerWithMigration
+createNode / createNodesBatch / updateNode / reorderNode / duplicateNode / deleteNode / replacePathwayNode
 createNodeStyle / updateNodeStyle / duplicateNodeStyle / deleteNodeStyleWithReplacement / setDefaultStyle
 createPathway / updatePathway / deletePathway / reorderPathwaySteps / setPathwayVisibility
 updateLayoutConfig
@@ -540,6 +543,9 @@ Tab 顺序与视觉顺序相同，不使用正数 `tabindex` 改序。提供“�
 工具从左到右：
 
 `选择、框选、平移｜新增节点、连接通路｜自动布局、对齐、分布｜缩小、缩放值、放大、适应画布`
+
+- 编辑/选择模式下，层级可沿泳道主轴拖动调整同级 `order`，节点可在所属叶子泳道内拖动调整同层 `order`；采用手机桌面图标式实时预览，被拖对象浮起，经过目标槽位时相邻对象平滑让位，松手后吸附回确定性布局并进入一条可撤销领域命令；不额外显示吸附框或目标序号，预览位置按动画帧合并为单一受控更新，避免闪烁；
+- 提供 `Alt+方向键` 的键盘等价排序。TB 下层级使用上下、节点使用左右；LR 下层级使用左右、节点使用上下；
 
 - 图标按钮 32×32，非直观操作有中文 Tooltip 和快捷键；
 - 层级用直角或 4px 圆角泳道容器；节点用轻圆角块；通路用带箭头 path；

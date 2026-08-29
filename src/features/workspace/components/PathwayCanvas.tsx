@@ -14,6 +14,7 @@ import {
   getSmoothStepPath,
   useReactFlow,
   useViewport,
+  type CoordinateExtent,
   type Edge,
   type EdgeProps,
   type Node,
@@ -25,8 +26,13 @@ import type {
   EditorMode,
   NodeStyle,
 } from "../../../domain/types";
+import { descendantIds, sortStable } from "../../../domain/rules";
 import { fullLayerPath, nodePathways } from "../../../domain/selectors";
-import { createPathway } from "../../../editor/commands";
+import {
+  createPathway,
+  reorderLayer,
+  reorderNode,
+} from "../../../editor/commands";
 import { useEditorStore } from "../../../editor/store";
 import { deriveEdges } from "../../../layout/derive-edges";
 import { fitViewportToBounds } from "../../../layout/fit-viewport";
@@ -34,7 +40,12 @@ import {
   chooseNodeActionPosition,
   type NodeActionPosition,
 } from "../../../layout/node-action-placement";
-import { layoutDiagram } from "../../../layout/swimlane-layout";
+import {
+  layoutDiagram,
+  type DiagramLayout,
+  type LayoutBusinessNode,
+  type Rect,
+} from "../../../layout/swimlane-layout";
 
 interface Props {
   mode: EditorMode;
@@ -47,6 +58,10 @@ interface BusinessData extends Record<string, unknown> {
   dimmed: boolean;
   step?: number;
   draftStep: boolean;
+  fontSize: number;
+  descriptionFontSize: number;
+  canReorder: boolean;
+  reorderAxis: "横向" | "纵向";
   finishAction?: {
     position: NodeActionPosition;
     nodeName: string;
@@ -58,6 +73,8 @@ interface LayerData extends Record<string, unknown> {
   name: string;
   depth: number;
   isLeaf: boolean;
+  canReorder: boolean;
+  reorderAxis: "横向" | "纵向";
 }
 type BusinessFlowNode = Node<BusinessData, "business">;
 type LayerFlowNode = Node<LayerData, "layer">;
@@ -71,6 +88,13 @@ interface ParallelData extends Record<string, unknown> {
   draft?: boolean;
 }
 type CanvasEdge = Edge<ParallelData>;
+
+interface DragPreview {
+  kind: "layer" | "node";
+  draggedId: string;
+  targetIndex: number;
+  position: { x: number; y: number };
+}
 
 const MIN_ZOOM = 0.001;
 const MAX_ZOOM = 2.5;
@@ -102,7 +126,33 @@ function CanvasInner({ mode, onCreateNode }: Props) {
   const { x: viewportX, y: viewportY, zoom } = useViewport();
   const stageRef = useRef<HTMLDivElement>(null);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
-  const layout = useMemo(() => layoutDiagram(diagram), [diagram]);
+  const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
+  const dragFrameRef = useRef(0);
+  const pendingDragPreviewRef = useRef<DragPreview | null>(null);
+  const layout = useMemo(
+    () => layoutDiagram(diagram, stageSize),
+    [diagram, stageSize],
+  );
+
+  const scheduleDragPreview = useCallback((preview: DragPreview) => {
+    pendingDragPreviewRef.current = preview;
+    if (dragFrameRef.current) return;
+    dragFrameRef.current = requestAnimationFrame(() => {
+      dragFrameRef.current = 0;
+      const pending = pendingDragPreviewRef.current;
+      pendingDragPreviewRef.current = null;
+      if (pending) setDragPreview(pending);
+    });
+  }, []);
+
+  const clearDragPreview = useCallback(() => {
+    cancelAnimationFrame(dragFrameRef.current);
+    dragFrameRef.current = 0;
+    pendingDragPreviewRef.current = null;
+    setDragPreview(null);
+  }, []);
+
+  useEffect(() => () => cancelAnimationFrame(dragFrameRef.current), []);
   const focusedPath = useMemo(
     () => diagram.pathways.find((pathway) => pathway.id === focused),
     [diagram.pathways, focused],
@@ -158,13 +208,20 @@ function CanvasInner({ mode, onCreateNode }: Props) {
       .sort((left, right) => left.depth - right.depth)
       .map((rect) => {
         const layer = diagram.layers.find((item) => item.id === rect.id);
+        const siblings = layer
+          ? diagram.layers.filter((item) => item.parentId === layer.parentId)
+          : [];
+        const canReorder = mode === "edit" && tool === "select" && siblings.length > 1;
         return {
           id: `layer::${rect.id}`,
           type: "layer",
           position: { x: rect.x, y: rect.y },
           style: { width: rect.width, height: rect.height, zIndex: 0 },
           zIndex: 0,
-          draggable: false,
+          draggable: canReorder,
+          extent: canReorder
+            ? layerDragExtent(rect, layout.bounds, diagram.layout.direction)
+            : undefined,
           selectable: true,
           focusable: true,
           selected: selection?.kind === "layer" && selection.id === rect.id,
@@ -175,6 +232,8 @@ function CanvasInner({ mode, onCreateNode }: Props) {
             name: layer?.name ?? "",
             depth: rect.depth,
             isLeaf: rect.isLeaf,
+            canReorder,
+            reorderAxis: diagram.layout.direction === "TB" ? "纵向" : "横向",
           },
         };
       });
@@ -196,13 +255,16 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           ? !relatedIds.has(node.id)
           : false;
       const participationCount = nodePathways(diagram, node.id).length;
+      const siblingRects = layout.nodes.filter((item) => item.layerId === node.layerId);
+      const canReorder = mode === "edit" && tool === "select" && siblingRects.length > 1;
       return {
         id: node.id,
         type: "business",
         position: { x: rect.x, y: rect.y },
         style: { width: rect.width, height: rect.height },
         zIndex: 4,
-        draggable: false,
+        draggable: canReorder,
+        extent: canReorder ? nodeDragExtent(siblingRects) : undefined,
         selectable: true,
         focusable: true,
         selected:
@@ -216,6 +278,10 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           dimmed,
           step: step && step > 0 ? step : undefined,
           draftStep: draftStep > 0,
+          fontSize: diagram.layout.fontSize,
+          descriptionFontSize: diagram.layout.descriptionFontSize,
+          canReorder,
+          reorderAxis: diagram.layout.direction === "TB" ? "横向" : "纵向",
           finishAction:
             draftStep === draft?.nodeIds.length && draftStep >= 2
               ? {
@@ -227,7 +293,10 @@ function CanvasInner({ mode, onCreateNode }: Props) {
         },
       };
     });
-    return [...layerNodes, ...businessNodes];
+    const canvasNodes: CanvasNode[] = [...layerNodes, ...businessNodes];
+    return dragPreview
+      ? applyDragPreview(canvasNodes, dragPreview, diagram, layout)
+      : canvasNodes;
   }, [
     diagram,
     draft,
@@ -239,6 +308,9 @@ function CanvasInner({ mode, onCreateNode }: Props) {
     multiSelectedNodeIds,
     relatedIds,
     selection,
+    mode,
+    tool,
+    dragPreview,
   ]);
 
   const edges = useMemo<CanvasEdge[]>(() => {
@@ -393,14 +465,144 @@ function CanvasInner({ mode, onCreateNode }: Props) {
       selectCanvasNode(node, event.ctrlKey || event.metaKey);
   };
 
+  const resetDraggedNodes = useCallback(() => {
+    clearDragPreview();
+  }, [clearDragPreview]);
+
+  const handleNodeDrag = useCallback(
+    (_event: MouseEvent | TouchEvent, dragged: CanvasNode) => {
+      if (mode !== "edit" || tool !== "select") return;
+      if (dragged.data.kind === "layer") {
+        const id = dragged.id.replace("layer::", "");
+        const source = diagram.layers.find((layer) => layer.id === id);
+        const sourceRect = layout.layers.find((rect) => rect.id === id);
+        if (!source || !sourceRect) return;
+        const siblings = sortStable(
+          diagram.layers.filter((layer) => layer.parentId === source.parentId),
+        );
+        const slots = siblings.map((layer) => layout.layers.find((rect) => rect.id === layer.id));
+        const targetIndex = closestAxisSlotIndex(
+          dragged.position,
+          sourceRect,
+          slots,
+          diagram.layout.direction === "TB" ? "y" : "x",
+        );
+        scheduleDragPreview({
+          kind: "layer",
+          draggedId: dragged.id,
+          targetIndex,
+          position: { ...dragged.position },
+        });
+        return;
+      }
+
+      const source = diagram.nodes.find((node) => node.id === dragged.id);
+      const sourceRect = layout.nodes.find((rect) => rect.id === dragged.id);
+      if (!source || !sourceRect) return;
+      const siblings = sortStable(
+        diagram.nodes.filter((node) => node.layerId === source.layerId),
+      );
+      const slots = siblings.map((node) => layout.nodes.find((rect) => rect.id === node.id));
+      const targetIndex = closestNodeSlotIndex(dragged.position, sourceRect, slots);
+      scheduleDragPreview({
+        kind: "node",
+        draggedId: dragged.id,
+        targetIndex,
+        position: { ...dragged.position },
+      });
+    },
+    [diagram, layout.layers, layout.nodes, mode, scheduleDragPreview, tool],
+  );
+
+  const handleNodeDragStop = useCallback(
+    (_event: MouseEvent | TouchEvent, dragged: CanvasNode) => {
+      clearDragPreview();
+      if (mode !== "edit" || tool !== "select") {
+        resetDraggedNodes();
+        return;
+      }
+      if (dragged.data.kind === "layer") {
+        const id = dragged.id.replace("layer::", "");
+        const source = diagram.layers.find((layer) => layer.id === id);
+        if (!source) return resetDraggedNodes();
+        const siblings = sortStable(
+          diagram.layers.filter((layer) => layer.parentId === source.parentId),
+        );
+        const sourceRect = layout.layers.find((rect) => rect.id === id);
+        if (!sourceRect) return resetDraggedNodes();
+        const targetIndex = closestAxisSlotIndex(
+          dragged.position,
+          sourceRect,
+          siblings.map((layer) => layout.layers.find((rect) => rect.id === layer.id)),
+          diagram.layout.direction === "TB" ? "y" : "x",
+        );
+        if (targetIndex === siblings.findIndex((layer) => layer.id === id))
+          return resetDraggedNodes();
+        if (!execute("调整层级顺序", (current) => reorderLayer(current, id, targetIndex)))
+          resetDraggedNodes();
+        return;
+      }
+
+      const source = diagram.nodes.find((node) => node.id === dragged.id);
+      const sourceRect = layout.nodes.find((rect) => rect.id === dragged.id);
+      if (!source || !sourceRect) return resetDraggedNodes();
+      const siblings = sortStable(
+        diagram.nodes.filter((node) => node.layerId === source.layerId),
+      );
+      const targetIndex = closestNodeSlotIndex(
+        dragged.position,
+        sourceRect,
+        siblings.map((node) => layout.nodes.find((rect) => rect.id === node.id)),
+      );
+      if (targetIndex === siblings.findIndex((node) => node.id === dragged.id))
+        return resetDraggedNodes();
+      if (!execute("调整节点顺序", (current) => reorderNode(current, dragged.id, targetIndex)))
+        resetDraggedNodes();
+    },
+    [clearDragPreview, diagram, execute, layout.layers, layout.nodes, mode, resetDraggedNodes, tool],
+  );
+
   const handleCanvasKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
     const target = event.target as HTMLElement;
     const flowElement = target.closest<HTMLElement>(
       ".react-flow__node, .react-flow__edge",
     );
     const id = flowElement?.dataset.id;
     if (!id) return;
+
+    if (event.altKey && mode === "edit" && tool === "select") {
+      const backwardKey = diagram.layout.direction === "TB" ? "ArrowUp" : "ArrowLeft";
+      const forwardKey = diagram.layout.direction === "TB" ? "ArrowDown" : "ArrowRight";
+      const nodeBackwardKey = diagram.layout.direction === "TB" ? "ArrowLeft" : "ArrowUp";
+      const nodeForwardKey = diagram.layout.direction === "TB" ? "ArrowRight" : "ArrowDown";
+      const isLayer = id.startsWith("layer::");
+      const delta = event.key === (isLayer ? backwardKey : nodeBackwardKey)
+        ? -1
+        : event.key === (isLayer ? forwardKey : nodeForwardKey)
+          ? 1
+          : 0;
+      if (delta) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (isLayer) {
+          const layerId = id.replace("layer::", "");
+          const source = diagram.layers.find((layer) => layer.id === layerId);
+          if (source) {
+            const siblings = sortStable(diagram.layers.filter((layer) => layer.parentId === source.parentId));
+            execute("调整层级顺序", (current) => reorderLayer(current, layerId, siblings.findIndex((layer) => layer.id === layerId) + delta));
+          }
+        } else {
+          const source = diagram.nodes.find((node) => node.id === id);
+          if (source) {
+            const siblings = sortStable(diagram.nodes.filter((node) => node.layerId === source.layerId));
+            execute("调整节点顺序", (current) => reorderNode(current, id, siblings.findIndex((node) => node.id === id) + delta));
+          }
+        }
+        return;
+      }
+    }
+
+    if (event.key !== "Enter" && event.key !== " ") return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -465,10 +667,11 @@ function CanvasInner({ mode, onCreateNode }: Props) {
             >
               ⌁ 连接
             </button>
+            <span className="drag-order-hint">拖动或 Alt+方向键调整顺序</span>
           </div>
         )}
         <div className="tool-group">
-          <button onClick={() => fitCanvas()} title="自动布局并适应画布">
+          <button onClick={() => fitCanvas()} title="按当前屏幕比例自动布局并适应画布">
             布局
           </button>
           <button onClick={() => void zoomOut()} aria-label="缩小">
@@ -508,13 +711,19 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onNodeClick={handleNodeClick}
+          onNodeDragStart={(_event, node) => {
+            selectCanvasNode(node);
+            handleNodeDrag(_event, node);
+          }}
+          onNodeDrag={handleNodeDrag}
+          onNodeDragStop={handleNodeDragStop}
           onEdgeClick={(_event, edge) => {
             if (edge.data?.pathwayId) focusPathway(edge.data.pathwayId);
           }}
           onPaneClick={() => {
             if (tool !== "connectPathway") select(null);
           }}
-          nodesDraggable={false}
+          nodesDraggable={mode === "edit" && tool === "select"}
           nodesConnectable={false}
           nodesFocusable
           edgesFocusable
@@ -588,7 +797,8 @@ function CanvasTextAlternative({ diagram }: { diagram: Diagram }) {
 
 const BusinessNode = memo(({ data, selected }: NodeProps<BusinessFlowNode>) => (
   <div
-    className={`business-node ${selected ? "selected" : ""} ${data.dimmed ? "dimmed" : ""}`}
+    className={`business-node ${data.canReorder ? "reorderable" : ""} ${selected ? "selected" : ""} ${data.dimmed ? "dimmed" : ""}`}
+    title={data.canReorder ? `${data.reorderAxis}拖动可调整同层节点顺序` : undefined}
     style={{
       background: data.style.fillColor,
       borderColor: data.style.borderColor,
@@ -630,9 +840,9 @@ const BusinessNode = memo(({ data, selected }: NodeProps<BusinessFlowNode>) => (
         {data.step}
       </b>
     )}
-    <strong>{data.node.name}</strong>
+    <strong style={{ fontSize: data.fontSize }}>{data.node.name}</strong>
     {data.node.decompositionItems.length > 0 && (
-      <ul>
+      <ul style={{ fontSize: data.descriptionFontSize }}>
         {data.node.decompositionItems.map((item, index) => (
           <li key={`${item}-${index}`}>{item}</li>
         ))}
@@ -646,7 +856,8 @@ BusinessNode.displayName = "BusinessNode";
 
 const LayerNode = memo(({ data, selected }: NodeProps<LayerFlowNode>) => (
   <div
-    className={`layer-canvas-node depth-${data.depth} ${selected ? "selected" : ""}`}
+    className={`layer-canvas-node depth-${data.depth} ${data.canReorder ? "reorderable" : ""} ${selected ? "selected" : ""}`}
+    title={data.canReorder ? `${data.reorderAxis}拖动可调整同级层级顺序` : undefined}
   >
     <strong>{data.name}</strong>
     {data.isLeaf && <span>泳道</span>}
@@ -691,6 +902,159 @@ const ParallelEdge = memo((props: EdgeProps<CanvasEdge>) => {
   );
 });
 ParallelEdge.displayName = "ParallelEdge";
+
+function applyDragPreview(
+  nodes: CanvasNode[],
+  preview: DragPreview,
+  diagram: Diagram,
+  layout: DiagramLayout,
+): CanvasNode[] {
+  if (preview.kind === "node") {
+    const source = diagram.nodes.find((node) => node.id === preview.draggedId);
+    if (!source) return nodes;
+    const siblings = sortStable(
+      diagram.nodes.filter((node) => node.layerId === source.layerId),
+    );
+    const slots = siblings.map((node) => layout.nodes.find((rect) => rect.id === node.id));
+    const previewIds = reorderedIds(
+      siblings.map((node) => node.id),
+      preview.draggedId,
+      preview.targetIndex,
+    );
+    return nodes.map((node) => {
+      if (node.id === preview.draggedId)
+        return withPreviewPosition(node, preview.position.x, preview.position.y);
+      if (node.data.kind !== "business") return node;
+      const previewIndex = previewIds.indexOf(node.id);
+      const destination = previewIndex >= 0 ? slots[previewIndex] : undefined;
+      return destination
+        ? withPreviewPosition(node, destination.x, destination.y)
+        : node;
+    });
+  }
+
+  const draggedLayerId = preview.draggedId.replace("layer::", "");
+  const source = diagram.layers.find((layer) => layer.id === draggedLayerId);
+  const sourceRect = layout.layers.find((rect) => rect.id === draggedLayerId);
+  if (!source || !sourceRect) return nodes;
+  const siblings = sortStable(
+    diagram.layers.filter((layer) => layer.parentId === source.parentId),
+  );
+  const slots = siblings.map((layer) => layout.layers.find((rect) => rect.id === layer.id));
+  const previewIds = reorderedIds(
+    siblings.map((layer) => layer.id),
+    draggedLayerId,
+    preview.targetIndex,
+  );
+  const groups = new Map<string, Set<string>>();
+  const deltas = new Map<string, { x: number; y: number }>();
+  siblings.forEach((layer) => {
+    const ids = descendantIds(diagram, layer.id);
+    ids.add(layer.id);
+    groups.set(layer.id, ids);
+    const original = layout.layers.find((rect) => rect.id === layer.id);
+    if (!original) return;
+    const destination = layer.id === draggedLayerId
+      ? preview.position
+      : slots[previewIds.indexOf(layer.id)];
+    if (destination)
+      deltas.set(layer.id, {
+        x: destination.x - original.x,
+        y: destination.y - original.y,
+      });
+  });
+
+  return nodes.map((node) => {
+    if (node.id === preview.draggedId)
+      return withPreviewPosition(node, preview.position.x, preview.position.y);
+    const domainLayerId = node.data.kind === "layer"
+      ? node.id.replace("layer::", "")
+      : node.data.node.layerId;
+    const rootId = siblings.find((layer) => groups.get(layer.id)?.has(domainLayerId))?.id;
+    const delta = rootId ? deltas.get(rootId) : undefined;
+    const original = node.data.kind === "layer"
+      ? layout.layers.find((rect) => rect.id === domainLayerId)
+      : layout.nodes.find((rect) => rect.id === node.id);
+    return delta && original
+      ? withPreviewPosition(node, original.x + delta.x, original.y + delta.y)
+      : node;
+  });
+}
+
+function reorderedIds(ids: string[], id: string, targetIndex: number): string[] {
+  const next = ids.filter((item) => item !== id);
+  next.splice(Math.max(0, Math.min(targetIndex, next.length)), 0, id);
+  return next;
+}
+
+function withPreviewPosition(node: CanvasNode, x: number, y: number): CanvasNode {
+  if (node.position.x === x && node.position.y === y) return node;
+  return { ...node, position: { x, y } };
+}
+
+function layerDragExtent(
+  rect: Rect,
+  bounds: Rect,
+  direction: "TB" | "LR",
+): CoordinateExtent {
+  if (direction === "TB") {
+    return [
+      [rect.x, bounds.y - bounds.height],
+      [rect.x + rect.width, bounds.y + bounds.height * 2 + rect.height],
+    ];
+  }
+  return [
+    [bounds.x - bounds.width, rect.y],
+    [bounds.x + bounds.width * 2 + rect.width, rect.y + rect.height],
+  ];
+}
+
+function nodeDragExtent(rects: LayoutBusinessNode[]): CoordinateExtent {
+  return [
+    [Math.min(...rects.map((rect) => rect.x)), Math.min(...rects.map((rect) => rect.y))],
+    [Math.max(...rects.map((rect) => rect.x + rect.width)), Math.max(...rects.map((rect) => rect.y + rect.height))],
+  ];
+}
+
+function closestAxisSlotIndex(
+  position: { x: number; y: number },
+  draggedRect: Rect,
+  slots: Array<Rect | undefined>,
+  axis: "x" | "y",
+): number {
+  const center = position[axis] + (axis === "x" ? draggedRect.width : draggedRect.height) / 2;
+  return closestIndex(slots, (slot) => {
+    const slotCenter = slot[axis] + (axis === "x" ? slot.width : slot.height) / 2;
+    return Math.abs(center - slotCenter);
+  });
+}
+
+function closestNodeSlotIndex(
+  position: { x: number; y: number },
+  draggedRect: Rect,
+  slots: Array<Rect | undefined>,
+): number {
+  const centerX = position.x + draggedRect.width / 2;
+  const centerY = position.y + draggedRect.height / 2;
+  return closestIndex(slots, (slot) => Math.hypot(
+    centerX - (slot.x + slot.width / 2),
+    centerY - (slot.y + slot.height / 2),
+  ));
+}
+
+function closestIndex(
+  slots: Array<Rect | undefined>,
+  distance: (slot: Rect) => number,
+): number {
+  let result = 0;
+  let minimum = Number.POSITIVE_INFINITY;
+  slots.forEach((slot, index) => {
+    if (!slot) return;
+    const current = distance(slot);
+    if (current < minimum) { minimum = current; result = index; }
+  });
+  return result;
+}
 
 const nodeTypes = { business: BusinessNode, layer: LayerNode };
 const edgeTypes = { parallel: ParallelEdge };

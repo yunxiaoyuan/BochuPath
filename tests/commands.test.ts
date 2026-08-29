@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankDiagram, createDemoDiagram } from '../src/domain/seed';
 import { parseBatchNames } from '../src/editor/batch-input';
-import { createLayer, createLayersBatch, createNode, createNodesBatch, createNodeStyle, createPathway, deleteNode, deleteNodeStyleWithReplacement, setDefaultStyle } from '../src/editor/commands';
+import { createLayer, createLayersBatch, createNode, createNodesBatch, createNodeStyle, createPathway, deleteNode, deleteNodeStyleWithReplacement, reorderLayer, reorderNode, setDefaultStyle } from '../src/editor/commands';
 
 describe('domain commands', () => {
   it('creates a child and migrates existing nodes atomically', () => {
@@ -51,5 +51,21 @@ describe('domain commands', () => {
     const diagram = createBlankDiagram('批量冲突');
     expect(() => createLayersBatch(diagram, { names: ['业务层', '业务层'], parentId: null })).toThrow('LAYER_SIBLING_NAME_DUPLICATE');
     expect(diagram.layers).toHaveLength(0);
+  });
+  it('persists constrained layer/node ordering when later objects are added', () => {
+    let diagram = createDemoDiagram();
+    diagram = reorderLayer(diagram, 'layer_delivery', 0);
+    diagram = createLayer(diagram, { name: '运营层', parentId: null });
+    expect([...diagram.layers].sort((a, b) => a.order - b.order).map((layer) => layer.name)).toEqual([
+      '交付层', '需求层', '方案层', '运营层',
+    ]);
+
+    diagram = createNode(diagram, { name: '需求分析', layerId: 'layer_demand', styleId: 'style_confirmed' });
+    diagram = createNode(diagram, { name: '需求归档', layerId: 'layer_demand', styleId: 'style_confirmed' });
+    diagram = reorderNode(diagram, 'node_demand', 2);
+    diagram = createNode(diagram, { name: '新增需求', layerId: 'layer_demand', styleId: 'style_confirmed' });
+    expect(diagram.nodes.filter((node) => node.layerId === 'layer_demand').sort((a, b) => a.order - b.order).map((node) => node.name)).toEqual([
+      '需求分析', '需求归档', '需求确认', '新增需求',
+    ]);
   });
 });

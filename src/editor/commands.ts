@@ -55,6 +55,15 @@ export function updateLayer(diagram: Diagram, id: string, input: LayerInput): Di
 
 export const moveLayer = updateLayer;
 
+export function reorderLayer(diagram: Diagram, id: string, targetIndex: number): Diagram {
+  const source = diagram.layers.find((layer) => layer.id === id);
+  if (!source) fail('REFERENCE_NOT_FOUND', `layers.${id}`);
+  return commit(diagram, (next) => {
+    const siblings = sortByOrder(next.layers.filter((layer) => layer.parentId === source.parentId));
+    reorderAt(siblings, id, targetIndex);
+  });
+}
+
 export function deleteLayerWithMigration(diagram: Diagram, id: string, targetLayerId?: string): Diagram {
   const removedIds = descendantIds(diagram, id); removedIds.add(id); const affected = diagram.nodes.filter((x) => removedIds.has(x.layerId));
   if (affected.length && (!targetLayerId || removedIds.has(targetLayerId) || !isLeafLayer(diagram, targetLayerId))) fail('LAYER_MIGRATION_TARGET_INVALID', 'targetLayerId');
@@ -88,6 +97,15 @@ export function createNodesBatch(diagram: Diagram, input: BatchNodeInput): Diagr
 export function updateNode(diagram: Diagram, id: string, input: NodeInput): Diagram {
   validateNodeInput(diagram, input);
   return commit(diagram, (next) => { const node = next.nodes.find((x) => x.id === id); if (!node) fail('REFERENCE_NOT_FOUND', `nodes.${id}`); Object.assign(node, { name: input.name.trim(), layerId: input.layerId, styleId: input.styleId, description: input.description?.trim() || undefined, decompositionItems: cleanItems(input.decompositionItems) }); if (input.order !== undefined) node.order = input.order; });
+}
+
+export function reorderNode(diagram: Diagram, id: string, targetIndex: number): Diagram {
+  const source = diagram.nodes.find((node) => node.id === id);
+  if (!source) fail('REFERENCE_NOT_FOUND', `nodes.${id}`);
+  return commit(diagram, (next) => {
+    const siblings = sortByOrder(next.nodes.filter((node) => node.layerId === source.layerId));
+    reorderAt(siblings, id, targetIndex);
+  });
 }
 
 function validateNodeInput(diagram: Diagram, input: NodeInput): void {
@@ -159,6 +177,18 @@ export function reorderPathwaySteps(diagram: Diagram, id: string, nodeIds: strin
 }
 export function setPathwayVisibility(diagram: Diagram, id: string, visible: boolean): Diagram { return commit(diagram, (next) => { const pathway = next.pathways.find((x) => x.id === id); if (!pathway) fail('REFERENCE_NOT_FOUND', `pathways.${id}`); pathway.visible = visible; }); }
 export function updateLayoutConfig(diagram: Diagram, input: Partial<LayoutConfig>): Diagram { return commit(diagram, (next) => { next.layout = { ...next.layout, ...input }; }); }
+
+function sortByOrder<T extends { id: string; order: number }>(items: T[]): T[] {
+  return [...items].sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
+}
+
+function reorderAt<T extends { id: string; order: number }>(items: T[], id: string, targetIndex: number): void {
+  const sourceIndex = items.findIndex((item) => item.id === id);
+  if (sourceIndex < 0) fail('REFERENCE_NOT_FOUND', id);
+  const [source] = items.splice(sourceIndex, 1);
+  items.splice(Math.max(0, Math.min(Math.trunc(targetIndex), items.length)), 0, source!);
+  items.forEach((item, index) => { item.order = (index + 1) * 10; });
+}
 
 export type DiagramCommand = (diagram: Diagram) => Diagram;
 export interface CommandRecord { label: string; before: Diagram; after: Diagram }

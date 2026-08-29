@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 test("opens the seed diagram, switches modes and persists an edit", async ({
   page,
@@ -47,6 +47,48 @@ test("fits the complete TB/LR canvas and renders directed arrows at 1440x900", a
   await expectCanvasInsideStage(page);
   for (const edge of await edgePaths.all())
     await expect(edge).toHaveAttribute("marker-end", /url\(/);
+});
+
+test("keeps dragged layer/node order after adding and reopening at 1920x1080", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto("/diagrams/diagram_demo/edit");
+  await expect(page.getByLabel("通路图画布")).toBeVisible();
+
+  const demandLayer = page.locator('.react-flow__node-layer[data-id="layer::layer_demand"]');
+  const deliveryLayer = page.locator('.react-flow__node-layer[data-id="layer::layer_delivery"]');
+  await dragCanvasNode(page, demandLayer, deliveryLayer, "header");
+  await expect.poll(async () =>
+    (await demandLayer.boundingBox())!.y > (await deliveryLayer.boundingBox())!.y,
+  ).toBe(true);
+
+  await page.getByTitle("批量添加层级或节点").click();
+  await page.getByLabel("所属叶子层级").selectOption({ label: "需求层" });
+  await page.getByLabel("节点名称列表").fill("需求分析；需求归档");
+  await page.getByRole("button", { name: "确定" }).click();
+
+  const demandNode = page.getByRole("button", { name: /需求确认，位于 需求层/ });
+  const archiveNode = page.getByRole("button", { name: /需求归档，位于 需求层/ });
+  await dragCanvasNode(page, demandNode, archiveNode);
+  await expect.poll(async () =>
+    (await demandNode.boundingBox())!.x > (await archiveNode.boundingBox())!.x,
+  ).toBe(true);
+
+  await page.getByTitle("新增节点").click();
+  await page.getByLabel("节点名称").fill("后来新增");
+  await page.getByLabel("所属叶子层级").selectOption({ label: "需求层" });
+  await page.getByRole("button", { name: "确定" }).click();
+  const laterNode = page.getByRole("button", { name: /后来新增，位于 需求层/ });
+  expect((await demandNode.boundingBox())!.x).toBeLessThan((await laterNode.boundingBox())!.x);
+
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByText("✓ 已保存")).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("通路图画布")).toBeVisible();
+  expect((await demandLayer.boundingBox())!.y).toBeGreaterThan((await deliveryLayer.boundingBox())!.y);
+  expect((await demandNode.boundingBox())!.x).toBeGreaterThan((await archiveNode.boundingBox())!.x);
+  expect((await demandNode.boundingBox())!.x).toBeLessThan((await laterNode.boundingBox())!.x);
 });
 
 test("keeps tree, canvas and inspector selection synchronized and undoable", async ({
@@ -201,6 +243,33 @@ async function expectCanvasInsideStage(page: Page): Promise<void> {
       stage!.y + stage!.height - 23,
     );
   }
+}
+
+async function dragCanvasNode(
+  page: Page,
+  source: Locator,
+  target: Locator,
+  grip: "center" | "header" = "center",
+): Promise<void> {
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  expect(sourceBox).not.toBeNull();
+  expect(targetBox).not.toBeNull();
+  const sourceX = grip === "header" ? sourceBox!.x + sourceBox!.width - 28 : sourceBox!.x + sourceBox!.width / 2;
+  const sourceY = grip === "header" ? sourceBox!.y + 22 : sourceBox!.y + sourceBox!.height / 2;
+  const targetX = grip === "header" ? targetBox!.x + targetBox!.width - 28 : targetBox!.x + targetBox!.width / 2;
+  const targetY = grip === "header" ? targetBox!.y + 22 : targetBox!.y + targetBox!.height / 2;
+  await page.mouse.move(sourceX, sourceY);
+  await page.mouse.down();
+  await page.mouse.move(targetX, targetY, { steps: 10 });
+  await expect(page.locator(".snap-preview")).toHaveCount(0);
+  await expect.poll(async () => {
+    const shiftedTargetBox = await target.boundingBox();
+    return grip === "header"
+      ? Math.abs(shiftedTargetBox!.y - targetBox!.y)
+      : Math.abs(shiftedTargetBox!.x - targetBox!.x);
+  }).toBeGreaterThan(8);
+  await page.mouse.up();
 }
 
 async function expectPathwayFinishNearLastNode(
