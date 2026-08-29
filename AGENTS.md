@@ -9,6 +9,36 @@
 - `docs/development-spec.md`：V1.0 唯一实施与验收规格，开发时优先阅读。
 - `docs/product-design.md`：产品定位、对象模型、用户流程和产品设计背景。
 
+## 文档访问方法
+
+### 本地文档
+
+- 优先读取工作区 `docs/` 下的 Markdown 文件。
+- 当前已保存：
+  - `docs/development-spec.md`
+  - `docs/product-design.md`
+- 不要假设已删除的附件仍然存在；需要设计规范时，以当前用户提供的新文件或开发规格中的视觉章节为准。
+
+### Confluence 文档
+
+- Confluence 基地址：`https://docs.fscut.com`。
+- 优先使用已配置的 Confluence MCP（服务名：`confluence`）读取页面；常用工具包括 `confluence_get_page` 和 `confluence_search`。
+- 精确页面：
+  - 产品设计：页面 ID `768523529`
+  - 开发规格：页面 ID `768523575`
+- 如需通过 REST API 只读访问，使用：
+  - 页面正文：`GET /rest/api/content/{pageId}?expand=body.view,body.storage,version,space,ancestors`
+  - 页面附件：`GET /rest/api/content/{pageId}/child/attachment?limit=100`
+- 认证使用配置好的 Server/Data Center PAT；PAT 只从本机安全配置读取，不输出到聊天、日志、补丁或提交中。
+- 不要把 `/wiki` 作为默认 API 前缀；先使用上述基地址验证实际路径。
+
+### draw.io 图
+
+- 产品设计页面中的 draw.io 图通常以页面宏和 `.drawio` 附件存在。
+- 先读取页面正文和附件元数据，再下载对应附件本体。
+- 将 `.drawio` 文件按 XML/`mxfile` 解析，提取节点、标签、层级和连线；需要视觉判断时再渲染为 SVG/PNG。
+- 不能只根据页面截图或附件文件名推断图中结构；关键结论要以 XML 数据或渲染结果为依据。
+
 ## 需求优先级
 
 1. 当前用户明确请求。
@@ -76,6 +106,7 @@
 ## 变更纪律
 
 - 只修改完成当前任务所需的文件。
+- 修改代码时必须同步更新相关文档，确保文档内容与实现保持一致。
 - 不覆盖或重置用户已有修改。
 - 不提交密钥、PAT、个人凭据或本地环境文件。
 - 对删除、批量重命名、依赖升级和外部系统写入先确认目标与影响。

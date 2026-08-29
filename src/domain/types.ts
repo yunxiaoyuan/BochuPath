@@ -6,7 +6,7 @@ export type PathwayId = string;
 export type PathStepId = string;
 
 export interface Diagram {
-  schemaVersion: '1.0';
+  schemaVersion: "1.0";
   id: DiagramId;
   name: string;
   description?: string;
@@ -41,10 +41,10 @@ export interface DiagramNode {
 export interface NodeStyle {
   id: NodeStyleId;
   name: string;
-  shape: 'rect' | 'roundedRect' | 'document';
+  shape: "rect" | "roundedRect" | "document";
   fillColor: string;
   borderColor: string;
-  borderStyle: 'solid' | 'dashed' | 'dotted';
+  borderStyle: "solid" | "dashed" | "dotted";
   borderWidth: 1 | 2 | 3;
   borderRadius: number;
   textColor: string;
@@ -58,7 +58,7 @@ export interface Pathway {
   name: string;
   description?: string;
   color: string;
-  lineStyle: 'solid' | 'dashed';
+  lineStyle: "solid" | "dashed";
   visible: boolean;
   order: number;
   steps: PathStep[];
@@ -71,7 +71,7 @@ export interface PathStep {
 }
 
 export interface LayoutConfig {
-  direction: 'TB' | 'LR';
+  direction: "TB" | "LR";
   layerGap: number;
   nodeGap: number;
   nodeWidth: number;
@@ -81,16 +81,18 @@ export interface LayoutConfig {
 }
 
 export type Selection =
-  | { kind: 'diagram'; id: DiagramId }
-  | { kind: 'layer'; id: LayerId }
-  | { kind: 'node'; id: NodeId }
-  | { kind: 'nodeStyle'; id: NodeStyleId }
-  | { kind: 'pathway'; id: PathwayId }
+  | { kind: "diagram"; id: DiagramId }
+  | { kind: "layer"; id: LayerId }
+  | { kind: "node"; id: NodeId }
+  | { kind: "nodeStyle"; id: NodeStyleId }
+  | { kind: "pathway"; id: PathwayId }
+  | { kind: "pathwayDraft"; id: "new" }
   | null;
 
-export type EditorMode = 'view' | 'edit';
-export type EditorTool = 'select' | 'marquee' | 'pan' | 'createNode' | 'connectPathway';
-export type SaveState = 'clean' | 'dirty' | 'saving' | 'saveError';
+export type EditorMode = "view" | "edit";
+export type EditorTool =
+  "select" | "marquee" | "pan" | "createNode" | "connectPathway";
+export type SaveState = "clean" | "dirty" | "saving" | "saveError";
 
 export interface DiagramSummary {
   id: DiagramId;
@@ -106,5 +108,5 @@ export interface PathwayDraft {
   name: string;
   nodeIds: NodeId[];
   color: string;
-  lineStyle: 'solid' | 'dashed';
+  lineStyle: "solid" | "dashed";
 }

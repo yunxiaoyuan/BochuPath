@@ -24,6 +24,8 @@ npm run build
 
 首次运行 E2E 前如本机尚未安装 Chromium，请执行 `npx playwright install chromium`。
 
+E2E 同时运行 `@axe-core/playwright` 的浅色/深色主题 WCAG 2 A/AA 自动扫描。自动扫描不能替代人工键盘、焦点顺序、200% 缩放和读屏验收。
+
 ## 架构
 
 - `src/domain`：V1.0 持久化类型、Zod Schema、稳定错误码、不变量、选择器与种子数据。
@@ -32,13 +34,15 @@ npm run build
 - `src/persistence`：Repository 接口与 localStorage Adapter；正式文档、摘要索引和草稿分 key 存储，并使用 revision 乐观锁。
 - `src/features`：图库、三栏工作台、统一 Selection、Inspector CRUD、查看查询和 React Flow 派生画布。
 
+画布的“布局”和“适应”以实际可见画布尺寸和布局边界计算缩放，不会把三栏工作台外框误当作可用区域；确认通路和连接草稿都显示方向箭头及步骤序号。层级树、节点/通路列表、画布和 Inspector 共用同一个选择状态，并支持鼠标与 Enter/Space 键操作。
+
 ## 本地存储
 
 - `pathway:v1:index`
 - `pathway:v1:diagram:<diagramId>`
 - `pathway:v1:draft:<diagramId>`
 
-每个领域命令在 500ms 防抖后写草稿；手动保存递增 revision、清除草稿并重置命令历史。加载到更新草稿时由用户选择恢复或放弃。
+每个领域命令在 500ms 防抖后写草稿；手动保存递增 revision、清除草稿并重置命令历史。脏状态相对于最近一次成功保存的事实数据计算，因此撤销回保存基线会恢复“已保存”状态并清理草稿，重做后重新变为未保存。加载到更新草稿时由用户选择恢复或放弃。
 
 ## V1.0 边界
 
