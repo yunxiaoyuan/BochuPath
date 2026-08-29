@@ -31,7 +31,7 @@ if not exist "node_modules\.bin\vite.cmd" (
 echo 正在启动业务通路图...
 start "业务通路图开发服务器" /D "%~dp0" cmd /k "npm run dev -- --host 127.0.0.1"
 
-timeout /t 2 /nobreak >nul
+ping 127.0.0.1 -n 3 >nul
 start "" "http://localhost:5173/diagrams"
 
 endlocal
