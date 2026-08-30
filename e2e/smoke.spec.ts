@@ -259,8 +259,25 @@ async function dragCanvasNode(
   const sourceY = grip === "header" ? sourceBox!.y + 22 : sourceBox!.y + sourceBox!.height / 2;
   const targetX = grip === "header" ? targetBox!.x + targetBox!.width - 28 : targetBox!.x + targetBox!.width / 2;
   const targetY = grip === "header" ? targetBox!.y + 22 : targetBox!.y + targetBox!.height / 2;
+  const sourceVisual = source.locator(".business-node, .layer-canvas-node");
+  const sourceVisualBox = await sourceVisual.boundingBox();
+  const wasSelected = await source.evaluate((element) =>
+    element.classList.contains("selected"),
+  );
+  expect(sourceVisualBox).not.toBeNull();
   await page.mouse.move(sourceX, sourceY);
   await page.mouse.down();
+  await page.mouse.move(sourceX + 3, sourceY + 2, { steps: 2 });
+  await expect(source).toHaveClass(/dragging/);
+  expect(
+    await source.evaluate((element) => element.classList.contains("selected")),
+  ).toBe(wasSelected);
+  await expect.poll(() =>
+    sourceVisual.evaluate((element) => getComputedStyle(element).transform),
+  ).toBe("none");
+  const liftedVisualBox = await sourceVisual.boundingBox();
+  expect(Math.abs(liftedVisualBox!.width - sourceVisualBox!.width)).toBeLessThan(1);
+  expect(Math.abs(liftedVisualBox!.height - sourceVisualBox!.height)).toBeLessThan(1);
   await page.mouse.move(targetX, targetY, { steps: 10 });
   await expect(page.locator(".snap-preview")).toHaveCount(0);
   await expect.poll(async () => {

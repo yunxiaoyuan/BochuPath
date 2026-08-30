@@ -12,6 +12,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   getSmoothStepPath,
+  useNodesState,
   useReactFlow,
   useViewport,
   type CoordinateExtent,
@@ -126,33 +127,12 @@ function CanvasInner({ mode, onCreateNode }: Props) {
   const { x: viewportX, y: viewportY, zoom } = useViewport();
   const stageRef = useRef<HTMLDivElement>(null);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
-  const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
-  const dragFrameRef = useRef(0);
-  const pendingDragPreviewRef = useRef<DragPreview | null>(null);
+  const draggingRef = useRef(false);
+  const dragPreviewRef = useRef<DragPreview | null>(null);
   const layout = useMemo(
     () => layoutDiagram(diagram, stageSize),
     [diagram, stageSize],
   );
-
-  const scheduleDragPreview = useCallback((preview: DragPreview) => {
-    pendingDragPreviewRef.current = preview;
-    if (dragFrameRef.current) return;
-    dragFrameRef.current = requestAnimationFrame(() => {
-      dragFrameRef.current = 0;
-      const pending = pendingDragPreviewRef.current;
-      pendingDragPreviewRef.current = null;
-      if (pending) setDragPreview(pending);
-    });
-  }, []);
-
-  const clearDragPreview = useCallback(() => {
-    cancelAnimationFrame(dragFrameRef.current);
-    dragFrameRef.current = 0;
-    pendingDragPreviewRef.current = null;
-    setDragPreview(null);
-  }, []);
-
-  useEffect(() => () => cancelAnimationFrame(dragFrameRef.current), []);
   const focusedPath = useMemo(
     () => diagram.pathways.find((pathway) => pathway.id === focused),
     [diagram.pathways, focused],
@@ -203,7 +183,7 @@ function CanvasInner({ mode, onCreateNode }: Props) {
     );
   }, [draft?.nodeIds, layout.nodes, stageSize, viewportX, viewportY, zoom]);
 
-  const nodes = useMemo<CanvasNode[]>(() => {
+  const derivedNodes = useMemo<CanvasNode[]>(() => {
     const layerNodes: LayerFlowNode[] = [...layout.layers]
       .sort((left, right) => left.depth - right.depth)
       .map((rect) => {
@@ -293,10 +273,7 @@ function CanvasInner({ mode, onCreateNode }: Props) {
         },
       };
     });
-    const canvasNodes: CanvasNode[] = [...layerNodes, ...businessNodes];
-    return dragPreview
-      ? applyDragPreview(canvasNodes, dragPreview, diagram, layout)
-      : canvasNodes;
+    return [...layerNodes, ...businessNodes];
   }, [
     diagram,
     draft,
@@ -310,8 +287,14 @@ function CanvasInner({ mode, onCreateNode }: Props) {
     selection,
     mode,
     tool,
-    dragPreview,
   ]);
+
+  const [flowNodes, setFlowNodes, onNodesChange] =
+    useNodesState<CanvasNode>(derivedNodes);
+
+  useEffect(() => {
+    if (!draggingRef.current) setFlowNodes(derivedNodes);
+  }, [derivedNodes, setFlowNodes]);
 
   const edges = useMemo<CanvasEdge[]>(() => {
     const confirmed: CanvasEdge[] = deriveEdges(diagram).map((edge) => {
@@ -466,8 +449,10 @@ function CanvasInner({ mode, onCreateNode }: Props) {
   };
 
   const resetDraggedNodes = useCallback(() => {
-    clearDragPreview();
-  }, [clearDragPreview]);
+    draggingRef.current = false;
+    dragPreviewRef.current = null;
+    setFlowNodes(derivedNodes);
+  }, [derivedNodes, setFlowNodes]);
 
   const handleNodeDrag = useCallback(
     (_event: MouseEvent | TouchEvent, dragged: CanvasNode) => {
@@ -487,12 +472,16 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           slots,
           diagram.layout.direction === "TB" ? "y" : "x",
         );
-        scheduleDragPreview({
+        const preview: DragPreview = {
           kind: "layer",
           draggedId: dragged.id,
           targetIndex,
           position: { ...dragged.position },
-        });
+        };
+        dragPreviewRef.current = preview;
+        setFlowNodes((current) =>
+          applyDragPreview(current, preview, diagram, layout),
+        );
         return;
       }
 
@@ -504,19 +493,31 @@ function CanvasInner({ mode, onCreateNode }: Props) {
       );
       const slots = siblings.map((node) => layout.nodes.find((rect) => rect.id === node.id));
       const targetIndex = closestNodeSlotIndex(dragged.position, sourceRect, slots);
-      scheduleDragPreview({
+      const preview: DragPreview = {
         kind: "node",
         draggedId: dragged.id,
         targetIndex,
         position: { ...dragged.position },
-      });
+      };
+      const previous = dragPreviewRef.current;
+      dragPreviewRef.current = preview;
+      if (
+        previous?.kind === preview.kind &&
+        previous.draggedId === preview.draggedId &&
+        previous.targetIndex === preview.targetIndex
+      )
+        return;
+      setFlowNodes((current) =>
+        applyDragPreview(current, preview, diagram, layout),
+      );
     },
-    [diagram, layout.layers, layout.nodes, mode, scheduleDragPreview, tool],
+    [diagram, layout, mode, setFlowNodes, tool],
   );
 
   const handleNodeDragStop = useCallback(
     (_event: MouseEvent | TouchEvent, dragged: CanvasNode) => {
-      clearDragPreview();
+      draggingRef.current = false;
+      dragPreviewRef.current = null;
       if (mode !== "edit" || tool !== "select") {
         resetDraggedNodes();
         return;
@@ -536,10 +537,14 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           siblings.map((layer) => layout.layers.find((rect) => rect.id === layer.id)),
           diagram.layout.direction === "TB" ? "y" : "x",
         );
-        if (targetIndex === siblings.findIndex((layer) => layer.id === id))
-          return resetDraggedNodes();
+        if (targetIndex === siblings.findIndex((layer) => layer.id === id)) {
+          resetDraggedNodes();
+          selectCanvasNode(dragged);
+          return;
+        }
         if (!execute("调整层级顺序", (current) => reorderLayer(current, id, targetIndex)))
           resetDraggedNodes();
+        selectCanvasNode(dragged);
         return;
       }
 
@@ -554,12 +559,16 @@ function CanvasInner({ mode, onCreateNode }: Props) {
         sourceRect,
         siblings.map((node) => layout.nodes.find((rect) => rect.id === node.id)),
       );
-      if (targetIndex === siblings.findIndex((node) => node.id === dragged.id))
-        return resetDraggedNodes();
+      if (targetIndex === siblings.findIndex((node) => node.id === dragged.id)) {
+        resetDraggedNodes();
+        selectCanvasNode(dragged);
+        return;
+      }
       if (!execute("调整节点顺序", (current) => reorderNode(current, dragged.id, targetIndex)))
         resetDraggedNodes();
+      selectCanvasNode(dragged);
     },
-    [clearDragPreview, diagram, execute, layout.layers, layout.nodes, mode, resetDraggedNodes, tool],
+    [diagram, execute, layout.layers, layout.nodes, mode, resetDraggedNodes, selectCanvasNode, tool],
   );
 
   const handleCanvasKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -607,7 +616,7 @@ function CanvasInner({ mode, onCreateNode }: Props) {
     event.preventDefault();
     event.stopPropagation();
 
-    const node = nodes.find((item) => item.id === id);
+    const node = flowNodes.find((item) => item.id === id);
     if (node) {
       if (node.data.kind === "business" && tool === "connectPathway" && draft) {
         if (!draft.nodeIds.includes(node.id))
@@ -706,14 +715,15 @@ function CanvasInner({ mode, onCreateNode }: Props) {
         onKeyDownCapture={handleCanvasKeyDown}
       >
         <ReactFlow<CanvasNode, CanvasEdge>
-          nodes={nodes}
+          nodes={flowNodes}
           edges={edges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
+          onNodesChange={onNodesChange}
           onNodeClick={handleNodeClick}
-          onNodeDragStart={(_event, node) => {
-            selectCanvasNode(node);
-            handleNodeDrag(_event, node);
+          onNodeDragStart={() => {
+            draggingRef.current = true;
+            dragPreviewRef.current = null;
           }}
           onNodeDrag={handleNodeDrag}
           onNodeDragStop={handleNodeDragStop}
@@ -723,6 +733,7 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           onPaneClick={() => {
             if (tool !== "connectPathway") select(null);
           }}
+          selectNodesOnDrag={false}
           nodesDraggable={mode === "edit" && tool === "select"}
           nodesConnectable={false}
           nodesFocusable
