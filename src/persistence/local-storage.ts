@@ -3,16 +3,35 @@ import { createBlankDiagram, createDemoDiagram, DEMO_DIAGRAM_ID, newId } from '.
 import { parseDiagram } from '../domain/schema';
 import type { Diagram, DiagramSummary } from '../domain/types';
 import type { DiagramRepository, DraftRecord, NewDiagramInput } from './repository';
+import { getBrowserStorage } from './browser-storage';
 
-const INDEX_KEY = 'pathway:v1:index';
-const diagramKey = (id: string) => `pathway:v1:diagram:${id}`;
-const draftKey = (id: string) => `pathway:v1:draft:${id}`;
+const INDEX_KEY = 'bochupath:v1:index';
+const LEGACY_INDEX_KEY = 'pathway:v1:index';
+const diagramKey = (id: string) => `bochupath:v1:diagram:${id}`;
+const draftKey = (id: string) => `bochupath:v1:draft:${id}`;
+const legacyDiagramKey = (id: string) => `pathway:v1:diagram:${id}`;
+const legacyDraftKey = (id: string) => `pathway:v1:draft:${id}`;
 
 function persistenceError(code: 'PERSISTENCE_CONFLICT' | 'PERSISTENCE_FAILED'): DomainError { return new DomainError({ code, message: errorMessages[code] }); }
 function summary(diagram: Diagram): DiagramSummary { return { id: diagram.id, name: diagram.name, description: diagram.description, revision: diagram.revision, updatedAt: diagram.updatedAt, nodeCount: diagram.nodes.length, pathwayCount: diagram.pathways.length }; }
 
 export class LocalStorageDiagramRepository implements DiagramRepository {
-  constructor(private storage: Storage = window.localStorage) { this.ensureSeed(); }
+  constructor(private storage: Storage = getBrowserStorage()) { this.migrateLegacyData(); this.ensureSeed(); }
+  private migrateLegacyData(): void {
+    try {
+      if (this.storage.getItem(INDEX_KEY) !== null) return;
+      const legacyRaw = this.storage.getItem(LEGACY_INDEX_KEY);
+      if (!legacyRaw) return;
+      const legacyItems = JSON.parse(legacyRaw) as DiagramSummary[];
+      legacyItems.forEach(({ id }) => {
+        const diagram = this.storage.getItem(legacyDiagramKey(id));
+        const draft = this.storage.getItem(legacyDraftKey(id));
+        if (diagram !== null) this.storage.setItem(diagramKey(id), diagram);
+        if (draft !== null) this.storage.setItem(draftKey(id), draft);
+      });
+      this.storage.setItem(INDEX_KEY, legacyRaw);
+    } catch { throw persistenceError('PERSISTENCE_FAILED'); }
+  }
   private ensureSeed(): void {
     try {
       if (this.storage.getItem(INDEX_KEY) === null) { const demo = createDemoDiagram(); this.storage.setItem(diagramKey(demo.id), JSON.stringify(demo)); this.storage.setItem(INDEX_KEY, JSON.stringify([summary(demo)])); }
@@ -49,11 +68,17 @@ export class LocalStorageDiagramRepository implements DiagramRepository {
     try { this.storage.removeItem(diagramKey(id)); this.storage.removeItem(draftKey(id)); this.writeIndex(this.readIndex().filter((x) => x.id !== id)); } catch { throw persistenceError('PERSISTENCE_FAILED'); }
   }
   async getDraft(id: string): Promise<DraftRecord | null> {
-    try { const raw = this.storage.getItem(draftKey(id)); if (!raw) return null; const parsed = JSON.parse(raw) as DraftRecord; return { savedAt: parsed.savedAt, diagram: assertValid(parseDiagram(parsed.diagram)) }; } catch { throw persistenceError('PERSISTENCE_FAILED'); }
+    try {
+      let raw = this.storage.getItem(draftKey(id));
+      if (!raw) {
+        raw = this.storage.getItem(legacyDraftKey(id));
+        if (raw) this.storage.setItem(draftKey(id), raw);
+      }
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as DraftRecord;
+      return { savedAt: parsed.savedAt, diagram: assertValid(parseDiagram(parsed.diagram)) };
+    } catch { throw persistenceError('PERSISTENCE_FAILED'); }
   }
   async saveDraft(diagram: Diagram): Promise<void> { try { this.storage.setItem(draftKey(diagram.id), JSON.stringify({ diagram, savedAt: new Date().toISOString() } satisfies DraftRecord)); } catch { throw persistenceError('PERSISTENCE_FAILED'); } }
   async deleteDraft(id: string): Promise<void> { try { this.storage.removeItem(draftKey(id)); } catch { throw persistenceError('PERSISTENCE_FAILED'); } }
 }
-
-let singleton: LocalStorageDiagramRepository | undefined;
-export function getRepository(): LocalStorageDiagramRepository { singleton ??= new LocalStorageDiagramRepository(); return singleton; }

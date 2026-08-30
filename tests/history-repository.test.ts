@@ -65,6 +65,28 @@ describe("history and repository", () => {
     await repo.deleteDraft(saved.id);
     expect(await repo.getDraft(saved.id)).toBeNull();
   });
+  it("migrates the legacy pathway namespace without deleting it", async () => {
+    const storage = new MemoryStorage();
+    const diagram = createDemoDiagram();
+    const legacySummary = [{
+      id: diagram.id,
+      name: diagram.name,
+      description: diagram.description,
+      revision: diagram.revision,
+      updatedAt: diagram.updatedAt,
+      nodeCount: diagram.nodes.length,
+      pathwayCount: diagram.pathways.length,
+    }];
+    storage.setItem("pathway:v1:index", JSON.stringify(legacySummary));
+    storage.setItem(`pathway:v1:diagram:${diagram.id}`, JSON.stringify(diagram));
+
+    const repo = new LocalStorageDiagramRepository(storage);
+
+    expect((await repo.get(diagram.id)).name).toBe(diagram.name);
+    expect(storage.getItem("bochupath:v1:index")).toBeTruthy();
+    expect(storage.getItem(`bochupath:v1:diagram:${diagram.id}`)).toBeTruthy();
+    expect(storage.getItem("pathway:v1:index")).toBeTruthy();
+  });
   it("compares saved factual content without revision metadata noise", () => {
     const saved = createDemoDiagram();
     const sameContent = {

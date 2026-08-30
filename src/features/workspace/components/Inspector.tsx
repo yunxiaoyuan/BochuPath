@@ -182,8 +182,8 @@ function DiagramForm({ mode }: { mode: EditorMode }) {
         {issues.length > 0 && <IssueList />}
       </div>
     );
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault();
     execute("更新通路图", (current) =>
       updateLayoutConfig(renameDiagram(current, { name, description }), {
         direction,
@@ -254,7 +254,7 @@ function DiagramForm({ mode }: { mode: EditorMode }) {
         </Field>
       </div>
       {issues.length > 0 && <IssueList />}
-      <FormFooter onCancel={reset} />
+      <FormFooter onCancel={reset} onConfirm={submit} />
     </form>
   );
 }
@@ -315,8 +315,8 @@ function BatchCreateForm({ onDone }: { onDone: () => void }) {
     ? diagram.nodes.filter((node) => node.layerId === parentId)
     : [];
 
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault();
     if (invalid) return;
     const before = new Set(
       objectKind === "layer"
@@ -470,7 +470,7 @@ function BatchCreateForm({ onDone }: { onDone: () => void }) {
           </ol>
         )}
       </section>
-      <FormFooter onCancel={onDone} disabled={invalid} />
+      <FormFooter onCancel={onDone} onConfirm={submit} disabled={invalid} />
     </form>
   );
 }
@@ -521,8 +521,8 @@ function LayerForm({
     ? diagram.nodes.filter((x) => removedIds.has(x.layerId))
     : [];
   const targets = leafLayers(diagram).filter((x) => !removedIds.has(x.id));
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault();
     const before = new Set(diagram.layers.map((x) => x.id));
     const ok = execute(layer ? "更新层级" : "新建层级", (d) =>
       layer
@@ -617,7 +617,7 @@ function LayerForm({
           该上级已有节点；创建子层后，这些节点会在同一事务中迁入新子层。
         </p>
       )}
-      <FormFooter onCancel={cancel} />
+      <FormFooter onCancel={cancel} onConfirm={submit} />
       {layer && (
         <DangerZone>
           <p>
@@ -718,8 +718,8 @@ function NodeForm({
         {onDone && <button onClick={onDone}>返回</button>}
       </div>
     );
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault();
     const before = new Set(diagram.nodes.map((x) => x.id));
     const input = {
       name,
@@ -835,7 +835,7 @@ function NodeForm({
           onChange={(e) => setDescription(e.target.value)}
         />
       </Field>
-      <FormFooter onCancel={cancel} />
+      <FormFooter onCancel={cancel} onConfirm={submit} />
       {node && (
         <>
           <button type="button" className="wide-secondary" onClick={duplicate}>
@@ -913,8 +913,8 @@ function StyleForm({
     key: K,
     value: (typeof form)[K],
   ) => setForm({ ...form, [key]: value });
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault();
     if (readOnly) return;
     const before = new Set(diagram.nodeStyles.map((x) => x.id));
     const input = {
@@ -1052,7 +1052,7 @@ function StyleForm({
       {style?.isSystem && (
         <p className="inline-info">系统样式为只读；可以复制后再编辑。</p>
       )}
-      {!readOnly && <FormFooter onCancel={cancel} />}
+      {!readOnly && <FormFooter onCancel={cancel} onConfirm={submit} />}
       {style && (
         <>
           <button type="button" className="wide-secondary" onClick={duplicate}>
@@ -1165,8 +1165,8 @@ function PathwayForm({
     [next[index], next[target]] = [next[target]!, next[index]!];
     setNodeIds(next);
   };
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault();
     const before = new Set(diagram.pathways.map((x) => x.id));
     const input = {
       name,
@@ -1295,7 +1295,7 @@ function PathwayForm({
         />
         在画布中显示
       </label>
-      <FormFooter onCancel={cancel} disabled={nodeIds.length < 2} />
+      <FormFooter onCancel={cancel} onConfirm={submit} disabled={nodeIds.length < 2} />
       {pathway && (
         <DangerZone>
           <p>删除通路不会删除其中的节点。</p>
@@ -1569,9 +1569,11 @@ function Field({
 }
 function FormFooter({
   onCancel,
+  onConfirm,
   disabled,
 }: {
   onCancel?: () => void;
+  onConfirm?: () => void;
   disabled?: boolean;
 }) {
   return (
@@ -1581,7 +1583,12 @@ function FormFooter({
           取消
         </button>
       )}
-      <button type="submit" className="primary-button" disabled={disabled}>
+      <button
+        type={onConfirm ? "button" : "submit"}
+        className="primary-button"
+        disabled={disabled}
+        onClick={onConfirm}
+      >
         确定
       </button>
     </div>

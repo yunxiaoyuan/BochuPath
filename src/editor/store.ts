@@ -16,7 +16,7 @@ import {
   type HistoryState,
 } from "./history";
 import type { DiagramCommand } from "./commands";
-import { getRepository } from "../persistence/local-storage";
+import { getRepository } from "../persistence/get-repository";
 import type { DraftRecord } from "../persistence/repository";
 
 let draftTimer: ReturnType<typeof setTimeout> | undefined;

@@ -19,7 +19,7 @@ export const errorMessages: Record<DomainErrorCode, string> = {
   NODE_STYLE_NOT_FOUND: '节点样式不存在', NODE_DELETE_BREAKS_PATHWAY: '删除后会使通路少于两个节点，请先处理受影响通路',
   STYLE_DEFAULT_DELETE_FORBIDDEN: '默认或系统样式不能删除', STYLE_IN_USE_REPLACEMENT_REQUIRED: '该样式正在使用，请选择替代样式',
   PATHWAY_MIN_STEPS: '通路至少需要两个节点', PATHWAY_DUPLICATE_NODE: '同一通路不能重复包含节点',
-  PERSISTENCE_CONFLICT: '保存版本冲突，请重新加载或另存副本', PERSISTENCE_FAILED: '保存失败，内存中的修改仍保留', FIELD_INVALID: '字段内容不符合要求',
+  PERSISTENCE_CONFLICT: '共享版本已更新，本地草稿已保留；请刷新查看最新版本并人工合并', PERSISTENCE_FAILED: '保存失败，内存中的修改仍保留', FIELD_INVALID: '字段内容不符合要求',
 };
 
 function issue(code: DomainErrorCode, path?: string): DomainIssue { return { code, path, message: errorMessages[code] }; }

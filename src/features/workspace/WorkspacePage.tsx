@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { usesSharedJsonRepository } from "../../app/runtime";
 import { createPathway } from "../../editor/commands";
 import { useEditorStore } from "../../editor/store";
 import type { EditorMode } from "../../domain/types";
@@ -27,6 +28,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
   const [createKind, setCreateKind] = useState<CreateKind>(null);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
+  const shared = usesSharedJsonRepository();
   useEffect(() => {
     const current = useEditorStore.getState();
     if (current.diagram?.id === diagramId) current.setMode(mode);
@@ -164,7 +166,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
           >
             <span className="product-mark">路</span>
           </button>
-          <span>业务通路图</span>
+          <span>BochuPath</span>
           <span aria-hidden="true">/</span>
           <strong title={diagram.name}>{diagram.name}</strong>
         </div>
@@ -293,7 +295,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
         <span>
           {diagram.layers.length} 层 · {diagram.nodes.length} 节点 ·{" "}
           {diagram.pathways.length} 通路 ·{" "}
-          {theme === "light" ? "Light" : "Dark"}
+          {theme === "light" ? "Light" : "Dark"} · {shared ? "共享数据" : "本机数据"}
         </span>
       </footer>
       <div className="small-viewport-warning">

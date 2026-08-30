@@ -655,12 +655,12 @@ interface DiagramRepository {
 
 UI 和 store 不得直接调用 localStorage 或 fetch，只调用 Repository。
 
-### 9.2 本地存储默认实现
+### 9.2 浏览器存储兜底与个人草稿
 
 ```text
-pathway:v1:index
-pathway:v1:diagram:<diagramId>
-pathway:v1:draft:<diagramId>
+bochupath:v1:index
+bochupath:v1:diagram:<diagramId>
+bochupath:v1:draft:<diagramId>
 ```
 
 - index 只存摘要；Diagram 分 key 存储；
@@ -668,16 +668,26 @@ pathway:v1:draft:<diagramId>
 - 每个已提交命令后 500ms 防抖写本地草稿；手动保存写正式文档、递增 revision、清除草稿并设为 clean；
 - 打开图时若草稿更新时间晚于正式版本，提示“恢复草稿 / 放弃草稿”，不得自动覆盖；
 - localStorage 满、解析失败或写入失败时显示持久 Message Bar，保留内存中的未保存内容。
+- 旧版 `pathway:v1:*` 首次读取时复制迁移到 `bochupath:v1:*`，不自动删除旧 key。
 
-### 9.3 有后端时的等价接口
+### 9.3 共享 JSON 与 PageDrop 异步协作实现
+
+- 本机开发与 PageDrop 运行态均使用 `bochupath-data.json` 作为共享正式数据源；本机运行数据位于 Git 忽略的 `.bochupath/`，PageDrop 使用同一外链下的 JSON 文件；禁止把共享正式数据写入 localStorage；
+- 图库每次打开及窗口重新聚焦时读取最新共享文件；编辑页加载时读取最新 Diagram；
+- 手动保存携带加载时的 Diagram revision。共享版本已变化时返回 `PERSISTENCE_CONFLICT`，保留当前浏览器草稿，由用户刷新后人工合并；
+- 草稿继续使用 `bochupath:v1:draft:<diagramId>`，只属于当前浏览器，不共享；
+- PageDrop 当前仅提供整文件覆盖写入，不提供原子 compare-and-swap，因此支持多人异步协作，不承诺实时同屏、自动合并或同一瞬间并发写入无冲突；
+- 更新 PageDrop 外链代码前必须先读取外链详情并保留线上全部 `.json`，尤其是 `bochupath-data.json`。
+
+### 9.4 有后端时的等价接口
 
 ```text
-GET    /api/pathway-diagrams
-POST   /api/pathway-diagrams
-GET    /api/pathway-diagrams/:id
-PUT    /api/pathway-diagrams/:id   Body: Diagram；If-Match/expectedRevision
-POST   /api/pathway-diagrams/:id/duplicate
-DELETE /api/pathway-diagrams/:id
+GET    /api/bochupath-diagrams
+POST   /api/bochupath-diagrams
+GET    /api/bochupath-diagrams/:id
+PUT    /api/bochupath-diagrams/:id   Body: Diagram；If-Match/expectedRevision
+POST   /api/bochupath-diagrams/:id/duplicate
+DELETE /api/bochupath-diagrams/:id
 ```
 
 - `PUT` 使用 revision 乐观锁；冲突返回 409 和 `PERSISTENCE_CONFLICT`，UI 保留本地版本并提示重新加载或另存副本；
