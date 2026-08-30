@@ -8,6 +8,7 @@ import {
   type FormEvent,
   type ReactElement,
 } from "react";
+import { useAppDialog } from "../../../app/AppDialog";
 import type {
   DiagramNode,
   EditorMode,
@@ -487,6 +488,7 @@ function LayerForm({
   const diagram = useEditorStore((s) => s.diagram)!;
   const execute = useEditorStore((s) => s.execute);
   const select = useEditorStore((s) => s.select);
+  const dialog = useAppDialog();
   const [name, setName] = useState(layer?.name ?? "");
   const [parentId, setParentId] = useState<string>(layer?.parentId ?? "");
   const [order, setOrder] = useState(layer?.order ?? 10);
@@ -558,14 +560,13 @@ function LayerForm({
     setDescription(layer?.description ?? "");
     setTarget("");
   };
-  const remove = () => {
-    if (
-      !layer ||
-      !window.confirm(
-        `删除“${layer.name}”及其 ${removedIds.size - 1} 个子层级？${affected.length ? ` ${affected.length} 个节点将被迁移。` : ""}`,
-      )
-    )
-      return;
+  const remove = async () => {
+    if (!layer || !await dialog.confirm({
+      title: "删除层级",
+      message: `删除“${layer.name}”及其 ${removedIds.size - 1} 个子层级？${affected.length ? ` ${affected.length} 个节点将被迁移。` : ""}`,
+      confirmLabel: "删除",
+      destructive: true,
+    })) return;
     if (
       execute("删除层级", (d) =>
         deleteLayerWithMigration(d, layer.id, target || undefined),
@@ -645,7 +646,7 @@ function LayerForm({
             type="button"
             className="danger-button"
             disabled={affected.length > 0 && !target}
-            onClick={remove}
+            onClick={() => void remove()}
           >
             删除层级
           </button>
@@ -667,6 +668,7 @@ function NodeForm({
   const diagram = useEditorStore((s) => s.diagram)!;
   const execute = useEditorStore((s) => s.execute);
   const select = useEditorStore((s) => s.select);
+  const dialog = useAppDialog();
   const leaves = leafLayers(diagram);
   const [name, setName] = useState(node?.name ?? "");
   const [layerId, setLayerId] = useState(node?.layerId ?? leaves[0]?.id ?? "");
@@ -765,15 +767,13 @@ function NodeForm({
   };
   const impact = node ? getDeleteNodeImpact(diagram, node.id) : [];
   const blocked = impact.some((x) => x.blocked);
-  const remove = () => {
-    if (
-      !node ||
-      blocked ||
-      !window.confirm(
-        `删除“${node.name}”？${impact.length ? ` 将从 ${impact.length} 条通路中移除并自动重连相邻步骤。` : ""}`,
-      )
-    )
-      return;
+  const remove = async () => {
+    if (!node || blocked || !await dialog.confirm({
+      title: "删除节点",
+      message: `删除“${node.name}”？${impact.length ? ` 将从 ${impact.length} 条通路中移除并自动重连相邻步骤。` : ""}`,
+      confirmLabel: "删除",
+      destructive: true,
+    })) return;
     if (execute("删除节点", (d) => deleteNode(d, node.id)))
       select({ kind: "diagram", id: diagram.id });
   };
@@ -859,7 +859,7 @@ function NodeForm({
               type="button"
               className="danger-button"
               disabled={blocked}
-              onClick={remove}
+              onClick={() => void remove()}
             >
               删除节点
             </button>
@@ -892,6 +892,7 @@ function StyleForm({
   const diagram = useEditorStore((s) => s.diagram)!;
   const execute = useEditorStore((s) => s.execute);
   const select = useEditorStore((s) => s.select);
+  const dialog = useAppDialog();
   const [form, setForm] = useState({ ...defaultStyle, ...style });
   const [replacement, setReplacement] = useState("");
   const refs = style ? styleReferenceCount(diagram, style.id) : 0;
@@ -956,14 +957,13 @@ function StyleForm({
       if (created) select({ kind: "nodeStyle", id: created.id });
     }
   };
-  const remove = () => {
-    if (
-      !style ||
-      !window.confirm(
-        `删除样式“${style.name}”？${refs ? ` ${refs} 个节点将替换样式。` : ""}`,
-      )
-    )
-      return;
+  const remove = async () => {
+    if (!style || !await dialog.confirm({
+      title: "删除样式",
+      message: `删除样式“${style.name}”？${refs ? ` ${refs} 个节点将替换样式。` : ""}`,
+      confirmLabel: "删除",
+      destructive: true,
+    })) return;
     if (
       execute("删除样式并替换引用", (d) =>
         deleteNodeStyleWithReplacement(d, style.id, replacement || undefined),
@@ -1093,7 +1093,7 @@ function StyleForm({
                 type="button"
                 disabled={refs > 0 && !replacement}
                 className="danger-button"
-                onClick={remove}
+                onClick={() => void remove()}
               >
                 删除样式
               </button>
@@ -1117,6 +1117,7 @@ function PathwayForm({
   const diagram = useEditorStore((s) => s.diagram)!;
   const execute = useEditorStore((s) => s.execute);
   const select = useEditorStore((s) => s.select);
+  const dialog = useAppDialog();
   const [name, setName] = useState(pathway?.name ?? "");
   const [nodeIds, setNodeIds] = useState(
     pathway
@@ -1207,12 +1208,13 @@ function PathwayForm({
     setVisible(pathway?.visible ?? true);
     setAddId("");
   };
-  const remove = () => {
-    if (
-      !pathway ||
-      !window.confirm(`删除通路“${pathway.name}”？节点不会被删除。`)
-    )
-      return;
+  const remove = async () => {
+    if (!pathway || !await dialog.confirm({
+      title: "删除通路",
+      message: `删除通路“${pathway.name}”？节点不会被删除。`,
+      confirmLabel: "删除",
+      destructive: true,
+    })) return;
     if (execute("删除通路", (d) => deletePathway(d, pathway.id)))
       select({ kind: "diagram", id: diagram.id });
   };
@@ -1299,7 +1301,7 @@ function PathwayForm({
       {pathway && (
         <DangerZone>
           <p>删除通路不会删除其中的节点。</p>
-          <button type="button" className="danger-button" onClick={remove}>
+          <button type="button" className="danger-button" onClick={() => void remove()}>
             删除通路
           </button>
         </DangerZone>

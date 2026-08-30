@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useAppDialog } from "../../app/AppDialog";
 import { usesSharedJsonRepository } from "../../app/runtime";
 import { createPathway } from "../../editor/commands";
 import { useEditorStore } from "../../editor/store";
@@ -24,6 +25,7 @@ interface Props {
 export function WorkspacePage({ mode, theme, onTheme }: Props) {
   const { diagramId = "" } = useParams();
   const navigate = useNavigate();
+  const dialog = useAppDialog();
   const state = useEditorStore();
   const [createKind, setCreateKind] = useState<CreateKind>(null);
   const [leftOpen, setLeftOpen] = useState(true);
@@ -120,14 +122,16 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
       window.removeEventListener("keydown", onKey);
     };
   }, []);
-  const switchMode = (next: EditorMode) => {
+  const switchMode = async (next: EditorMode) => {
     if (next === mode) return;
     if (
       state.saveState === "dirty" &&
       next === "view" &&
-      !window.confirm(
-        "当前有未保存修改。切换到查看模式会保留内存修改，但不会自动保存。继续吗？",
-      )
+      !await dialog.confirm({
+        title: "切换到查看模式",
+        message: "当前有未保存修改。切换后会保留内存修改，但不会自动保存。继续吗？",
+        confirmLabel: "继续切换",
+      })
     )
       return;
     navigate(`/diagrams/${diagramId}/${next}`);
@@ -173,13 +177,13 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
         <div className="mode-segment" role="group" aria-label="工作模式">
           <button
             aria-pressed={mode === "view"}
-            onClick={() => switchMode("view")}
+            onClick={() => void switchMode("view")}
           >
             查看
           </button>
           <button
             aria-pressed={mode === "edit"}
-            onClick={() => switchMode("edit")}
+            onClick={() => void switchMode("edit")}
           >
             编辑
           </button>

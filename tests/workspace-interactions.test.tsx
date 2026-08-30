@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDemoDiagram } from "../src/domain/seed";
+import { AppDialogProvider } from "../src/app/AppDialog";
 import { createHistory } from "../src/editor/history";
 import { useEditorStore } from "../src/editor/store";
 import { Inspector } from "../src/features/workspace/components/Inspector";
@@ -31,12 +32,12 @@ describe("workspace command transactions and unified selection", () => {
   it("cancels local form edits and commits one undoable command on confirm", async () => {
     const user = userEvent.setup();
     render(
-      <Inspector
+      <AppDialogProvider><Inspector
         mode="edit"
         createKind={null}
         onCreateHandled={vi.fn()}
         onClose={vi.fn()}
-      />,
+      /></AppDialogProvider>,
     );
 
     const input = screen.getByLabelText("节点名称");
@@ -94,12 +95,12 @@ describe("workspace command transactions and unified selection", () => {
     const user = userEvent.setup();
     const onCreateHandled = vi.fn();
     render(
-      <Inspector
+      <AppDialogProvider><Inspector
         mode="edit"
         createKind="batch"
         onCreateHandled={onCreateHandled}
         onClose={vi.fn()}
-      />,
+      /></AppDialogProvider>,
     );
 
     await user.type(
@@ -125,12 +126,12 @@ describe("workspace command transactions and unified selection", () => {
   it("switches the batch form to layers and preserves their input order", async () => {
     const user = userEvent.setup();
     render(
-      <Inspector
+      <AppDialogProvider><Inspector
         mode="edit"
         createKind="batch"
         onCreateHandled={vi.fn()}
         onClose={vi.fn()}
-      />,
+      /></AppDialogProvider>,
     );
 
     await user.selectOptions(screen.getByLabelText("对象类型"), "layer");

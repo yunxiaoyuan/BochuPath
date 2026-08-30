@@ -65,6 +65,7 @@ button:hover:not(:disabled) { background: var(--color-fill-level-1); border-colo
 .modal-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px; background: rgba(15, 20, 30, .42); }
 .modal-card { width: min(420px, 100%); border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-bg-base); box-shadow: var(--shadow-float); padding: 20px; }
 .modal-card h2 { margin: 0; font-size: 18px; }.modal-card p { color: var(--color-text-2); font-size: 12px; line-height: 1.5; margin: 7px 0 18px; }.modal-card .field { margin-bottom: 20px; }.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.app-dialog-card { width: min(440px, 100%); }.modal-actions .danger-button { width: auto; }
 
 /* Workspace shell */
 .workspace-shell { height: 100%; display: grid; grid-template-rows: 48px auto minmax(0, 1fr) 28px; background: var(--color-bg-page); }

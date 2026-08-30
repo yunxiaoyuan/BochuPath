@@ -82,6 +82,13 @@ test("PageDrop Inspector confirms layer, node and batch creation", async ({
   await expect(app.getByRole("treeitem", { name: "批量节点甲" })).toBeVisible();
   await expect(app.getByRole("treeitem", { name: "批量节点乙" })).toBeVisible();
 
+  await app.getByRole("treeitem", { name: "回归测试节点" }).click();
+  await app.getByRole("button", { name: "删除节点" }).click();
+  const confirmation = app.getByRole("alertdialog", { name: "删除节点" });
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole("button", { name: "删除", exact: true }).click();
+  await expect(app.getByRole("treeitem", { name: "回归测试节点" })).toHaveCount(0);
+
   await context.close();
 });
 
@@ -103,6 +110,24 @@ test("PageDrop sandbox creates a runnable blank diagram", async ({
     `<iframe title="PageDrop gallery" sandbox="allow-scripts allow-same-origin" style="width:1400px;height:800px" src="${baseURL}/api/link/test/files/index.html#/diagrams"></iframe>`,
   );
   const app = page.frameLocator('iframe[title="PageDrop gallery"]');
+
+  await app.getByRole("button", { name: "重命名", exact: true }).click();
+  const renameDialog = app.getByRole("dialog", { name: "重命名通路图" });
+  await renameDialog.getByLabel("新名称").fill("Sandbox 示例图");
+  await renameDialog.getByRole("button", { name: "重命名", exact: true }).click();
+  await expect(app.getByRole("heading", { name: "Sandbox 示例图" })).toBeVisible();
+
+  await app.getByRole("button", { name: "复制", exact: true }).click();
+  const duplicateDialog = app.getByRole("dialog", { name: "复制通路图" });
+  await duplicateDialog.getByLabel("副本名称").fill("Sandbox 副本");
+  await duplicateDialog.getByRole("button", { name: "复制", exact: true }).click();
+  const duplicateCard = app.getByRole("article").filter({ hasText: "Sandbox 副本" });
+  await expect(duplicateCard).toBeVisible();
+
+  await duplicateCard.getByRole("button", { name: "删除", exact: true }).click();
+  const deleteDialog = app.getByRole("alertdialog", { name: "删除通路图" });
+  await deleteDialog.getByRole("button", { name: "删除", exact: true }).click();
+  await expect(duplicateCard).toHaveCount(0);
 
   await app.getByRole("button", { name: /从空白图开始/ }).click();
   await app.getByLabel("通路图名称").fill("Sandbox 空白图");

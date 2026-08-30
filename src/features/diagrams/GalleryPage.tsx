@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAppDialog } from '../../app/AppDialog';
 import { isPageDropRuntime, usesSharedJsonRepository } from '../../app/runtime';
 import type { DiagramSummary } from '../../domain/types';
 import { renameDiagram } from '../../editor/commands';
@@ -8,6 +9,7 @@ import { getRepository } from '../../persistence/get-repository';
 interface Props { theme: 'light' | 'dark'; onTheme: () => void }
 export function GalleryPage({ theme, onTheme }: Props) {
   const navigate = useNavigate(); const [items, setItems] = useState<DiagramSummary[]>([]); const [message, setMessage] = useState(''); const [query, setQuery] = useState(''); const [createOpen, setCreateOpen] = useState(false); const [newName, setNewName] = useState('未命名通路图');
+  const dialog = useAppDialog();
   const pageDrop = isPageDropRuntime();
   const shared = usesSharedJsonRepository();
   const refresh = async () => setItems(await getRepository().list());
@@ -19,9 +21,9 @@ export function GalleryPage({ theme, onTheme }: Props) {
   }, []);
   const openCreate = () => { setNewName('未命名通路图'); setCreateOpen(true); };
   const create = async () => { const name = newName.trim(); if (!name) { setMessage('请输入通路图名称'); return; } try { const diagram = await getRepository().create({ name }); setCreateOpen(false); navigate(`/diagrams/${diagram.id}/edit`); } catch { setMessage('新建失败，请检查共享数据连接或浏览器存储'); } };
-  const duplicate = async (item: DiagramSummary) => { const name = window.prompt('副本名称', `${item.name} 副本`)?.trim(); if (!name) return; try { await getRepository().duplicate(item.id, name); await refresh(); setMessage('复制成功'); } catch { setMessage('复制失败'); } };
-  const remove = async (item: DiagramSummary) => { if (!window.confirm(`删除“${item.name}”？此操作不可撤销。`)) return; try { await getRepository().delete(item.id); await refresh(); setMessage('已删除通路图'); } catch { setMessage('删除失败；图库至少需要保留一张图'); } };
-  const rename = async (item: DiagramSummary) => { const name = window.prompt('新名称', item.name)?.trim(); if (!name || name === item.name) return; try { const diagram = await getRepository().get(item.id); await getRepository().save(renameDiagram(diagram, { name, description: diagram.description }), item.revision); await refresh(); setMessage('重命名成功'); } catch { setMessage('重命名失败'); } };
+  const duplicate = async (item: DiagramSummary) => { const name = (await dialog.prompt({ title: '复制通路图', label: '副本名称', defaultValue: `${item.name} 副本`, confirmLabel: '复制' }))?.trim(); if (!name) return; try { await getRepository().duplicate(item.id, name); await refresh(); setMessage('复制成功'); } catch { setMessage('复制失败'); } };
+  const remove = async (item: DiagramSummary) => { if (!await dialog.confirm({ title: '删除通路图', message: `删除“${item.name}”？此操作不可撤销。`, confirmLabel: '删除', destructive: true })) return; try { await getRepository().delete(item.id); await refresh(); setMessage('已删除通路图'); } catch { setMessage('删除失败；图库至少需要保留一张图'); } };
+  const rename = async (item: DiagramSummary) => { const name = (await dialog.prompt({ title: '重命名通路图', label: '新名称', defaultValue: item.name, confirmLabel: '重命名' }))?.trim(); if (!name || name === item.name) return; try { const diagram = await getRepository().get(item.id); await getRepository().save(renameDiagram(diagram, { name, description: diagram.description }), item.revision); await refresh(); setMessage('重命名成功'); } catch { setMessage('重命名失败'); } };
   const visible = items.filter((item) => item.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   return <div className="gallery-shell">
     <header className="gallery-header" aria-label="图库顶部栏">

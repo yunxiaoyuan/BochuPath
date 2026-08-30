@@ -179,8 +179,10 @@ test("creates and deletes a node through undoable domain commands", async ({
   ).toBeVisible();
   await expect(page.getByLabel("撤销")).toBeEnabled();
 
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "删除节点" }).click();
+  const confirmation = page.getByRole("alertdialog", { name: "删除节点" });
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole("button", { name: "删除", exact: true }).click();
   await expect(
     page.getByRole("treeitem", { name: "待删除测试节点" }),
   ).toHaveCount(0);
