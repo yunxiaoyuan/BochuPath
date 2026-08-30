@@ -91,6 +91,29 @@ describe("workspace command transactions and unified selection", () => {
     );
   });
 
+  it("clears pathway focus when the selection is cleared or changes", () => {
+    act(() => useEditorStore.getState().focusPathway("path_main"));
+    expect(useEditorStore.getState().selection).toEqual({
+      kind: "pathway",
+      id: "path_main",
+    });
+    expect(useEditorStore.getState().focusedPathwayId).toBe("path_main");
+
+    act(() => useEditorStore.getState().select(null));
+    expect(useEditorStore.getState().selection).toBeNull();
+    expect(useEditorStore.getState().focusedPathwayId).toBeNull();
+
+    act(() => {
+      useEditorStore.getState().focusPathway("path_main");
+      useEditorStore.getState().select({ kind: "node", id: "node_demand" });
+    });
+    expect(useEditorStore.getState().selection).toEqual({
+      kind: "node",
+      id: "node_demand",
+    });
+    expect(useEditorStore.getState().focusedPathwayId).toBeNull();
+  });
+
   it("previews and commits a node batch as one undoable command", async () => {
     const user = userEvent.setup();
     const onCreateHandled = vi.fn();

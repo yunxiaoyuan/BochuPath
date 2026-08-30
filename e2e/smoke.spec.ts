@@ -125,6 +125,23 @@ test("keeps tree, canvas and inspector selection synchronized and undoable", asy
   await expect(page.getByRole("treeitem", { name: "方案会审" })).toBeVisible();
 });
 
+test("clears pathway selection when clicking the canvas background", async ({
+  page,
+}) => {
+  await page.goto("/diagrams/diagram_demo/edit");
+  await page.getByRole("tab", { name: "通路" }).click();
+
+  const pathwayRow = page.locator(".pathway-row").filter({ hasText: "主通路" });
+  await pathwayRow.locator(".row-main").click();
+  await expect(page.getByRole("heading", { name: "通路属性" })).toBeVisible();
+  await expect(page.locator(".react-flow__edge.selected")).toHaveCount(2);
+
+  await page.locator(".react-flow__pane").click({ position: { x: 12, y: 12 } });
+  await expect(page.getByRole("heading", { name: "图概览" })).toBeVisible();
+  await expect(pathwayRow).not.toHaveClass(/selected/);
+  await expect(page.locator(".react-flow__edge.selected")).toHaveCount(0);
+});
+
 test("shows an arrowed draft edge and clears the complete draft with Escape", async ({
   page,
 }) => {

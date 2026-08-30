@@ -163,19 +163,31 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const ids = current.includes(selection.id)
         ? current.filter((x) => x !== selection.id)
         : [...current, selection.id];
-      set({ selection, multiSelectedNodeIds: ids });
+      set({
+        selection,
+        multiSelectedNodeIds: ids,
+        focusedPathwayId: null,
+      });
     } else {
       const nextNodeIds = selection?.kind === "node" ? [selection.id] : [];
+      const nextFocusedPathwayId =
+        selection?.kind === "pathway" ? selection.id : null;
       const sameSelection =
         state.selection?.kind === selection?.kind &&
         state.selection?.id === selection?.id;
       const sameNodes =
         current.length === nextNodeIds.length &&
         current.every((id, index) => id === nextNodeIds[index]);
-      if (sameSelection && sameNodes) return;
+      if (
+        sameSelection &&
+        sameNodes &&
+        state.focusedPathwayId === nextFocusedPathwayId
+      )
+        return;
       set({
         selection,
         multiSelectedNodeIds: nextNodeIds,
+        focusedPathwayId: nextFocusedPathwayId,
       });
     }
   },
