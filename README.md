@@ -60,7 +60,7 @@ E2E 同时运行 `@axe-core/playwright` 的浅色/深色主题 WCAG 2 A/AA 自�
 
 PageDrop 的 JSON 覆盖写接口目前没有原子 compare-and-swap，因此这是异步协作而不是实时同屏协作。应避免两人同时在数秒内保存同一张图；更新 PageDrop 代码包时必须先下载并原样保留线上 `bochupath-data.json`。本机开发通过 Vite 的同名 JSON 读写端点复现相同语义；嵌入环境限制浏览器存储时个人草稿降级到当前会话内存。
 
-Inspector 的“确定”按钮使用显式 React 事务，不依赖浏览器原生表单导航，因此在 PageDrop 的 sandbox iframe 未开放 `allow-forms` 时仍可提交；回归测试覆盖层级、节点和批量添加。
+所有关键确认操作都使用显式 React 事务，不依赖浏览器原生表单导航，因此在 PageDrop 的 sandbox iframe 未开放 `allow-forms` 时仍可提交；回归测试覆盖从空白图创建，以及 Inspector 的层级、节点和批量添加。
 
 ## V1.0 边界
 

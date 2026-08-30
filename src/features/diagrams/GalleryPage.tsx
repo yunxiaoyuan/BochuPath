@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { isPageDropRuntime, usesSharedJsonRepository } from '../../app/runtime';
 import type { DiagramSummary } from '../../domain/types';
@@ -18,7 +18,7 @@ export function GalleryPage({ theme, onTheme }: Props) {
     return () => window.removeEventListener('focus', reload);
   }, []);
   const openCreate = () => { setNewName('未命名通路图'); setCreateOpen(true); };
-  const create = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const name = newName.trim(); if (!name) { setMessage('请输入通路图名称'); return; } try { const diagram = await getRepository().create({ name }); setCreateOpen(false); navigate(`/diagrams/${diagram.id}/edit`); } catch { setMessage('新建失败，请检查共享数据连接或浏览器存储'); } };
+  const create = async () => { const name = newName.trim(); if (!name) { setMessage('请输入通路图名称'); return; } try { const diagram = await getRepository().create({ name }); setCreateOpen(false); navigate(`/diagrams/${diagram.id}/edit`); } catch { setMessage('新建失败，请检查共享数据连接或浏览器存储'); } };
   const duplicate = async (item: DiagramSummary) => { const name = window.prompt('副本名称', `${item.name} 副本`)?.trim(); if (!name) return; try { await getRepository().duplicate(item.id, name); await refresh(); setMessage('复制成功'); } catch { setMessage('复制失败'); } };
   const remove = async (item: DiagramSummary) => { if (!window.confirm(`删除“${item.name}”？此操作不可撤销。`)) return; try { await getRepository().delete(item.id); await refresh(); setMessage('已删除通路图'); } catch { setMessage('删除失败；图库至少需要保留一张图'); } };
   const rename = async (item: DiagramSummary) => { const name = window.prompt('新名称', item.name)?.trim(); if (!name || name === item.name) return; try { const diagram = await getRepository().get(item.id); await getRepository().save(renameDiagram(diagram, { name, description: diagram.description }), item.revision); await refresh(); setMessage('重命名成功'); } catch { setMessage('重命名失败'); } };
@@ -46,11 +46,11 @@ export function GalleryPage({ theme, onTheme }: Props) {
     </main>
     {createOpen && <div className="modal-backdrop" role="presentation" onMouseDown={() => setCreateOpen(false)}>
       <section className="modal-card" role="dialog" aria-modal="true" aria-labelledby="create-dialog-title" onMouseDown={(event) => event.stopPropagation()}>
-        <form onSubmit={(event) => void create(event)}>
+        <form onSubmit={(event) => { event.preventDefault(); void create(); }}>
           <h2 id="create-dialog-title">新建通路图</h2>
           <p>从空白图开始，系统会自动创建默认节点样式。</p>
           <label className="field"><span>通路图名称<b>*</b></span><input autoFocus value={newName} onChange={(event) => setNewName(event.target.value)} maxLength={80} /></label>
-          <div className="modal-actions"><button type="button" onClick={() => setCreateOpen(false)}>取消</button><button className="primary-button" type="submit">创建</button></div>
+          <div className="modal-actions"><button type="button" onClick={() => setCreateOpen(false)}>取消</button><button className="primary-button" type="button" onClick={() => void create()}>创建</button></div>
         </form>
       </section>
     </div>}

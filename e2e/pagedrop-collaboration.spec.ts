@@ -85,6 +85,36 @@ test("PageDrop Inspector confirms layer, node and batch creation", async ({
   await context.close();
 });
 
+test("PageDrop sandbox creates a runnable blank diagram", async ({
+  browser,
+  baseURL,
+}) => {
+  let sharedState: BochuPathSharedState = {
+    schemaVersion: "1.0",
+    revision: 1,
+    updatedAt: "2026-08-30T00:00:00.000Z",
+    lastMutationId: "seed_v1",
+    diagrams: [createDemoDiagram()],
+  };
+  const context = await browser.newContext();
+  await installSharedJsonRoute(context, () => sharedState, (next) => { sharedState = next; });
+  const page = await context.newPage();
+  await page.setContent(
+    `<iframe title="PageDrop gallery" sandbox="allow-scripts allow-same-origin" style="width:1400px;height:800px" src="${baseURL}/api/link/test/files/index.html#/diagrams"></iframe>`,
+  );
+  const app = page.frameLocator('iframe[title="PageDrop gallery"]');
+
+  await app.getByRole("button", { name: /从空白图开始/ }).click();
+  await app.getByLabel("通路图名称").fill("Sandbox 空白图");
+  await app.getByRole("button", { name: "创建", exact: true }).click();
+
+  await expect(app.getByLabel("通路图画布")).toBeVisible();
+  await expect(app.getByText("Sandbox 空白图", { exact: true }).first()).toBeVisible();
+  await expect.poll(() => sharedState.diagrams.some((diagram) => diagram.name === "Sandbox 空白图")).toBe(true);
+
+  await context.close();
+});
+
 async function installSharedJsonRoute(
   context: BrowserContext,
   getState: () => BochuPathSharedState,
