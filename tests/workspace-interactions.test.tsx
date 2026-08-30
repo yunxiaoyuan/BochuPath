@@ -91,6 +91,54 @@ describe("workspace command transactions and unified selection", () => {
     );
   });
 
+  it("defaults a new node to the selected leaf layer", () => {
+    act(() =>
+      useEditorStore
+        .getState()
+        .select({ kind: "layer", id: "layer_solution" }),
+    );
+    render(
+      <AppDialogProvider><Inspector
+        mode="edit"
+        createKind="node"
+        onCreateHandled={vi.fn()}
+        onClose={vi.fn()}
+      /></AppDialogProvider>,
+    );
+
+    expect(screen.getByLabelText("所属叶子层级")).toHaveValue("layer_solution");
+    act(() =>
+      useEditorStore
+        .getState()
+        .select({ kind: "layer", id: "layer_delivery" }),
+    );
+    expect(screen.getByLabelText("所属叶子层级")).toHaveValue("layer_delivery");
+  });
+
+  it("defaults a batch of new nodes to the selected node's leaf layer", () => {
+    act(() =>
+      useEditorStore
+        .getState()
+        .select({ kind: "node", id: "node_delivery" }),
+    );
+    render(
+      <AppDialogProvider><Inspector
+        mode="edit"
+        createKind="batch"
+        onCreateHandled={vi.fn()}
+        onClose={vi.fn()}
+      /></AppDialogProvider>,
+    );
+
+    expect(screen.getByLabelText("所属叶子层级")).toHaveValue("layer_delivery");
+    act(() =>
+      useEditorStore
+        .getState()
+        .select({ kind: "layer", id: "layer_solution" }),
+    );
+    expect(screen.getByLabelText("所属叶子层级")).toHaveValue("layer_solution");
+  });
+
   it("clears pathway focus when the selection is cleared or changes", () => {
     act(() => useEditorStore.getState().focusPathway("path_main"));
     expect(useEditorStore.getState().selection).toEqual({

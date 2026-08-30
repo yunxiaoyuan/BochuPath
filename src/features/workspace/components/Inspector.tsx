@@ -2,6 +2,7 @@ import {
   Children,
   cloneElement,
   isValidElement,
+  useEffect,
   useId,
   useMemo,
   useState,
@@ -10,11 +11,13 @@ import {
 } from "react";
 import { useAppDialog } from "../../../app/AppDialog";
 import type {
+  Diagram,
   DiagramNode,
   EditorMode,
   Layer,
   NodeStyle,
   Pathway,
+  Selection,
 } from "../../../domain/types";
 import {
   descendantIds,
@@ -260,33 +263,46 @@ function DiagramForm({ mode }: { mode: EditorMode }) {
   );
 }
 
-function BatchCreateForm({ onDone }: { onDone: () => void }) {
-  const diagram = useEditorStore((s) => s.diagram)!;
-  const selection = useEditorStore((s) => s.selection);
-  const execute = useEditorStore((s) => s.execute);
-  const select = useEditorStore((s) => s.select);
-  const leaves = leafLayers(diagram);
+function selectedLeafLayerId(
+  diagram: Diagram,
+  selection: Selection,
+): string | undefined {
   const contextualLayerId =
     selection?.kind === "layer"
       ? selection.id
       : selection?.kind === "node"
         ? diagram.nodes.find((node) => node.id === selection.id)?.layerId
         : undefined;
+  return contextualLayerId && isLeafLayer(diagram, contextualLayerId)
+    ? contextualLayerId
+    : undefined;
+}
+
+function BatchCreateForm({ onDone }: { onDone: () => void }) {
+  const diagram = useEditorStore((s) => s.diagram)!;
+  const selection = useEditorStore((s) => s.selection);
+  const execute = useEditorStore((s) => s.execute);
+  const select = useEditorStore((s) => s.select);
+  const leaves = leafLayers(diagram);
+  const defaultLayerId =
+    selectedLeafLayerId(diagram, selection) ?? leaves[0]?.id ?? "";
+  const contextualLayerId = selectedLeafLayerId(diagram, selection);
   const [objectKind, setObjectKind] = useState<"node" | "layer">("node");
   const [rawNames, setRawNames] = useState("");
   const [parentId, setParentId] = useState(
     selection?.kind === "layer" ? selection.id : "",
   );
   const [layerId, setLayerId] = useState(
-    contextualLayerId && isLeafLayer(diagram, contextualLayerId)
-      ? contextualLayerId
-      : (leaves[0]?.id ?? ""),
+    defaultLayerId,
   );
   const [styleId, setStyleId] = useState(
     diagram.nodeStyles.find((style) => style.isDefault)?.id ??
       diagram.nodeStyles[0]?.id ??
       "",
   );
+  useEffect(() => {
+    if (objectKind === "node" && contextualLayerId) setLayerId(contextualLayerId);
+  }, [contextualLayerId, objectKind, selection]);
   const names = useMemo(() => parseBatchNames(rawNames), [rawNames]);
   const maxNameLength = objectKind === "layer" ? 40 : 80;
   const tooLongNames = names.filter((name) => name.length > maxNameLength);
@@ -666,17 +682,24 @@ function NodeForm({
   onDone?: () => void;
 }) {
   const diagram = useEditorStore((s) => s.diagram)!;
+  const selection = useEditorStore((s) => s.selection);
   const execute = useEditorStore((s) => s.execute);
   const select = useEditorStore((s) => s.select);
   const dialog = useAppDialog();
   const leaves = leafLayers(diagram);
+  const defaultLayerId =
+    selectedLeafLayerId(diagram, selection) ?? leaves[0]?.id ?? "";
+  const contextualLayerId = selectedLeafLayerId(diagram, selection);
   const [name, setName] = useState(node?.name ?? "");
-  const [layerId, setLayerId] = useState(node?.layerId ?? leaves[0]?.id ?? "");
+  const [layerId, setLayerId] = useState(node?.layerId ?? defaultLayerId);
   const [styleId, setStyleId] = useState(
     node?.styleId ?? diagram.nodeStyles.find((x) => x.isDefault)?.id ?? "",
   );
   const [items, setItems] = useState(node?.decompositionItems.join("\n") ?? "");
   const [description, setDescription] = useState(node?.description ?? "");
+  useEffect(() => {
+    if (!node && contextualLayerId) setLayerId(contextualLayerId);
+  }, [contextualLayerId, node, selection]);
   const participations = node ? nodePathways(diagram, node.id) : [];
   if (mode === "view" && node)
     return (
@@ -758,7 +781,7 @@ function NodeForm({
       return;
     }
     setName(node?.name ?? "");
-    setLayerId(node?.layerId ?? leaves[0]?.id ?? "");
+    setLayerId(node?.layerId ?? defaultLayerId);
     setStyleId(
       node?.styleId ?? diagram.nodeStyles.find((x) => x.isDefault)?.id ?? "",
     );
