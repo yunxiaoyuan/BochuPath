@@ -49,7 +49,7 @@ test("fits the complete TB/LR canvas and renders directed arrows at 1440x900", a
     await expect(edge).toHaveAttribute("marker-end", /url\(/);
 });
 
-test("keeps dragged layer/node order after adding and reopening at 1920x1080", async ({
+test("blocks layer reorder that reverses a pathway and persists valid node order", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
@@ -59,8 +59,9 @@ test("keeps dragged layer/node order after adding and reopening at 1920x1080", a
   const demandLayer = page.locator('.react-flow__node-layer[data-id="layer::layer_demand"]');
   const deliveryLayer = page.locator('.react-flow__node-layer[data-id="layer::layer_delivery"]');
   await dragCanvasNode(page, demandLayer, deliveryLayer, "header");
+  await expect(page.getByText(/通路必须从上层依次指向下层.*主通路/)).toBeVisible();
   await expect.poll(async () =>
-    (await demandLayer.boundingBox())!.y > (await deliveryLayer.boundingBox())!.y,
+    (await demandLayer.boundingBox())!.y < (await deliveryLayer.boundingBox())!.y,
   ).toBe(true);
 
   await page.getByTitle("批量添加层级或节点").click();
@@ -86,7 +87,7 @@ test("keeps dragged layer/node order after adding and reopening at 1920x1080", a
   await expect(page.getByText("✓ 已保存")).toBeVisible();
   await page.reload();
   await expect(page.getByLabel("通路图画布")).toBeVisible();
-  expect((await demandLayer.boundingBox())!.y).toBeGreaterThan((await deliveryLayer.boundingBox())!.y);
+  expect((await demandLayer.boundingBox())!.y).toBeLessThan((await deliveryLayer.boundingBox())!.y);
   expect((await demandNode.boundingBox())!.x).toBeGreaterThan((await archiveNode.boundingBox())!.x);
   expect((await demandNode.boundingBox())!.x).toBeLessThan((await laterNode.boundingBox())!.x);
 });
@@ -180,6 +181,55 @@ test("shows an arrowed draft edge and clears the complete draft with Escape", as
   await expect(page.getByRole("heading", { name: "通路属性" })).toBeVisible();
   await expect(page.locator(".react-flow__edge-path")).toHaveCount(3);
   await expect(page.getByLabel("撤销")).toBeEnabled();
+});
+
+test("highlights every visible pathway node and edge in edit and view modes", async ({
+  page,
+}) => {
+  await page.goto("/diagrams/diagram_demo/edit");
+  await page.getByRole("button", { name: /方案评审，位于 方案层/ }).click();
+
+  await expect(page.locator(".business-node.related")).toHaveCount(2);
+  await expect(page.locator(".react-flow__edge.related-edge")).toHaveCount(2);
+  await expect(page.getByText(/已高亮 1 条可见通路、3 个关联节点/)).toBeVisible();
+
+  await page.getByRole("button", { name: "查看", exact: true }).click();
+  await expect(page.locator(".business-node.related")).toHaveCount(2);
+  await expect(page.locator(".react-flow__edge.related-edge")).toHaveCount(2);
+  await page.locator(".react-flow__pane").click({ position: { x: 12, y: 12 } });
+  await expect(page.locator(".business-node.related")).toHaveCount(0);
+  await expect(page.locator(".react-flow__edge.related-edge")).toHaveCount(0);
+});
+
+test("appends a layer-filtered node to an existing pathway and reopens it", async ({
+  page,
+}) => {
+  await page.goto("/diagrams/diagram_demo/edit");
+  await page.getByRole("button", { name: "＋ 层级" }).click();
+  await page.getByLabel("层级名称").fill("运营层");
+  await page.getByRole("button", { name: "确定" }).click();
+
+  await page.getByTitle("新增节点").click();
+  await page.getByLabel("节点名称").fill("运营复盘");
+  await page.getByLabel("所属叶子层级").selectOption({ label: "运营层" });
+  await page.getByRole("button", { name: "确定" }).click();
+
+  await page.getByRole("tab", { name: "通路" }).click();
+  await page.locator(".pathway-row").filter({ hasText: "主通路" }).locator(".row-main").click();
+  await page.getByRole("button", { name: /添加下游节点/ }).click();
+  await expect(page.getByRole("heading", { name: "编辑通路" })).toBeVisible();
+  await expect(page.locator(".business-node.candidate")).toHaveCount(1);
+  await page.getByRole("option", { name: /运营复盘/ }).click();
+  await page.getByRole("button", { name: "确定" }).click();
+  await expect(page.locator(".react-flow__edge-path")).toHaveCount(3);
+
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByText("✓ 已保存")).toBeVisible();
+  await page.reload();
+  await expect(page.locator(".react-flow__edge-path")).toHaveCount(3);
+  await page.getByRole("tab", { name: "通路" }).click();
+  await page.locator(".pathway-row").filter({ hasText: "主通路" }).locator(".row-main").click();
+  await expect(page.getByLabel("通路步骤").getByText("运营复盘", { exact: true })).toBeVisible();
 });
 
 test("creates and deletes a node through undoable domain commands", async ({

@@ -21,6 +21,13 @@ describe('domain commands', () => {
     diagram.nodes[0]!.styleId = custom.id; diagram = deleteNodeStyleWithReplacement(diagram, custom.id, 'style_confirmed');
     expect(diagram.nodeStyles.some((x) => x.id === custom.id)).toBe(false); expect(diagram.nodes[0]!.styleId).toBe('style_confirmed');
   });
+  it('rejects same-layer and upward pathway commands', () => {
+    let diagram = createDemoDiagram();
+    diagram = createNode(diagram, { name: '需求补充', layerId: 'layer_demand', styleId: 'style_confirmed' });
+    const sameLayerId = diagram.nodes.at(-1)!.id;
+    expect(() => createPathway(diagram, { name: '同层', nodeIds: ['node_demand', sameLayerId], color: '#000000', lineStyle: 'solid' })).toThrow('PATHWAY_LAYER_ORDER_INVALID');
+    expect(() => createPathway(diagram, { name: '回流', nodeIds: ['node_delivery', 'node_demand'], color: '#000000', lineStyle: 'solid' })).toThrow('PATHWAY_LAYER_ORDER_INVALID');
+  });
   it('keeps exactly one system default style', () => {
     const diagram = setDefaultStyle(createDemoDiagram(), 'style_review'); expect(diagram.nodeStyles.filter((x) => x.isDefault)).toHaveLength(1); expect(diagram.nodeStyles.find((x) => x.isDefault)?.id).toBe('style_review');
   });
@@ -54,6 +61,10 @@ describe('domain commands', () => {
   });
   it('persists constrained layer/node ordering when later objects are added', () => {
     let diagram = createDemoDiagram();
+    const before = structuredClone(diagram);
+    expect(() => reorderLayer(diagram, 'layer_delivery', 0)).toThrow('PATHWAY_LAYER_ORDER_INVALID');
+    expect(diagram).toEqual(before);
+    diagram.pathways = [];
     diagram = reorderLayer(diagram, 'layer_delivery', 0);
     diagram = createLayer(diagram, { name: '运营层', parentId: null });
     expect([...diagram.layers].sort((a, b) => a.order - b.order).map((layer) => layer.name)).toEqual([

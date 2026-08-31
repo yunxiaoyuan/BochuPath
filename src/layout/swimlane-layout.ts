@@ -1,3 +1,4 @@
+import { orderedLeafLayers } from '../domain/layer-order';
 import { layerChildren } from '../domain/selectors';
 import { layerDepth, sortStable } from '../domain/rules';
 import type { Diagram, DiagramNode, Layer } from '../domain/types';
@@ -30,14 +31,7 @@ export function layoutDiagram(diagram: Diagram, viewport?: LayoutViewport): Diag
 }
 
 function calculate(diagram: Diagram, viewport?: LayoutViewport): DiagramLayout {
-  const roots = layerChildren(diagram, null);
-  const leaves: Layer[] = [];
-  const walk = (layer: Layer) => {
-    const children = layerChildren(diagram, layer.id);
-    if (!children.length) leaves.push(layer);
-    else children.forEach(walk);
-  };
-  roots.forEach(walk);
+  const leaves = orderedLeafLayers(diagram);
 
   const nodesByLeaf = new Map(leaves.map((leaf) => [
     leaf.id,

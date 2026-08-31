@@ -61,7 +61,7 @@ test("PageDrop Inspector confirms layer, node and batch creation", async ({
   await installSharedJsonRoute(context, () => sharedState, (next) => { sharedState = next; });
   const page = await context.newPage();
   await page.setContent(
-    `<iframe title="PageDrop app" sandbox="allow-scripts allow-same-origin" style="width:1400px;height:800px" src="${baseURL}/api/link/test/files/index.html#/diagrams/diagram_demo/edit"></iframe>`,
+    `<iframe title="PageDrop app" sandbox="allow-scripts allow-same-origin allow-popups" style="width:1400px;height:800px" src="${baseURL}/api/link/test/files/index.html#/diagrams/diagram_demo/edit"></iframe>`,
   );
   const app = page.frameLocator('iframe[title="PageDrop app"]');
   const objectPanel = app.getByRole("complementary", { name: "对象面板" });
@@ -107,7 +107,7 @@ test("PageDrop sandbox creates a runnable blank diagram", async ({
   await installSharedJsonRoute(context, () => sharedState, (next) => { sharedState = next; });
   const page = await context.newPage();
   await page.setContent(
-    `<iframe title="PageDrop gallery" sandbox="allow-scripts allow-same-origin" style="width:1400px;height:800px" src="${baseURL}/api/link/test/files/index.html#/diagrams"></iframe>`,
+    `<iframe title="PageDrop gallery" sandbox="allow-scripts allow-same-origin allow-popups" style="width:1400px;height:800px" src="${baseURL}/api/link/test/files/index.html#/diagrams"></iframe>`,
   );
   const app = page.frameLocator('iframe[title="PageDrop gallery"]');
 
@@ -137,6 +137,104 @@ test("PageDrop sandbox creates a runnable blank diagram", async ({
   await expect(app.getByText("Sandbox 空白图", { exact: true }).first()).toBeVisible();
   await expect.poll(() => sharedState.diagrams.some((diagram) => diagram.name === "Sandbox 空白图")).toBe(true);
 
+  await context.close();
+});
+
+test("PageDrop sandbox edits downward pathways and highlights complete node context", async ({
+  browser,
+  baseURL,
+}) => {
+  const diagram = createDemoDiagram();
+  diagram.layers.push({ id: "layer_operation", parentId: null, name: "运营层", order: 40 });
+  diagram.nodes.push({
+    id: "node_operation",
+    layerId: "layer_operation",
+    styleId: "style_confirmed",
+    name: "运营复盘",
+    decompositionItems: [],
+    order: 10,
+  });
+  diagram.nodes.push({
+    id: "node_demand_alt",
+    layerId: "layer_demand",
+    styleId: "style_confirmed",
+    name: "需求补充",
+    decompositionItems: [],
+    order: 20,
+  });
+  let sharedState: BochuPathSharedState = {
+    schemaVersion: "1.0",
+    revision: 1,
+    updatedAt: "2026-08-31T00:00:00.000Z",
+    lastMutationId: "seed_pathway",
+    diagrams: [diagram],
+  };
+  const context = await browser.newContext();
+  await installSharedJsonRoute(context, () => sharedState, (next) => { sharedState = next; });
+  const page = await context.newPage();
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => consoleErrors.push(error.message));
+  await page.setContent(
+    `<iframe title="PageDrop pathways" sandbox="allow-scripts allow-same-origin allow-popups" style="width:1400px;height:800px" src="${baseURL}/api/link/test/files/index.html#/diagrams/diagram_demo/edit"></iframe>`,
+  );
+  const app = page.frameLocator('iframe[title="PageDrop pathways"]');
+
+  const demand = app.locator('.react-flow__node-business[data-id="node_demand"]');
+  const demandAlt = app.locator('.react-flow__node-business[data-id="node_demand_alt"]');
+  const demandBox = await demand.boundingBox();
+  const demandAltBox = await demandAlt.boundingBox();
+  expect(demandBox).not.toBeNull();
+  expect(demandAltBox).not.toBeNull();
+  await page.mouse.move(
+    demandAltBox!.x + demandAltBox!.width / 2,
+    demandAltBox!.y + demandAltBox!.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(demandAltBox!.x + demandAltBox!.width / 2 + 4, demandAltBox!.y + demandAltBox!.height / 2, { steps: 2 });
+  await page.mouse.move(demandBox!.x + demandBox!.width / 2, demandBox!.y + demandBox!.height / 2, { steps: 10 });
+  await page.mouse.up();
+  await expect.poll(async () =>
+    (await demandAlt.boundingBox())!.x < (await demand.boundingBox())!.x,
+  ).toBe(true);
+
+  await app.getByRole("button", { name: /连接/ }).click();
+  await app.getByRole("button", { name: /需求确认，位于 需求层/ }).click();
+  await expect(app.getByText("已选 1 个")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(app.getByRole("heading", { name: "新建通路" })).toHaveCount(0);
+  await app.getByRole("button", { name: "放大" }).click();
+  await app.getByRole("button", { name: "缩小" }).click();
+
+  await app.getByRole("tab", { name: "通路" }).click();
+  await app.locator(".pathway-row").filter({ hasText: "主通路" }).locator(".row-main").click();
+  await app.getByRole("button", { name: /添加下游节点/ }).click();
+  await expect(app.locator(".business-node.candidate")).toHaveCount(1);
+  await expect(app.locator('.react-flow__node-business[data-id="node_demand_alt"] .business-node')).toHaveClass(/dimmed/);
+  await app.locator("html").evaluate((element) => { element.style.zoom = "2"; });
+  await expect(app.getByRole("region", { name: "合法候选节点" })).toBeVisible();
+  await app.getByRole("button", { name: /运营复盘，位于 运营层/ }).click();
+  await app.getByRole("button", { name: "确定" }).press("Enter");
+  await app.locator("html").evaluate((element) => { element.style.zoom = ""; });
+
+  await expect(app.getByText("● 有未保存修改")).toBeVisible();
+  await app.getByLabel("返回通路图库").click();
+  const leaveDialog = app.getByRole("dialog", { name: "返回通路图库" });
+  await expect(leaveDialog).toBeVisible();
+  await leaveDialog.getByRole("button", { name: "取消" }).click();
+  await app.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(app.getByText("✓ 已保存")).toBeVisible();
+  expect(sharedState.diagrams[0]?.pathways[0]?.steps.map((step) => step.nodeId)).toEqual([
+    "node_demand", "node_solution", "node_delivery", "node_operation",
+  ]);
+
+  await app.getByRole("button", { name: "查看", exact: true }).click();
+  await app.getByRole("button", { name: /方案评审，位于 方案层/ }).click();
+  await expect(app.locator(".business-node.related")).toHaveCount(3);
+  await expect(app.locator(".react-flow__edge.related-edge")).toHaveCount(3);
+  expect(consoleErrors).toEqual([]);
   await context.close();
 });
 

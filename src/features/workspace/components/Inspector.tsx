@@ -17,6 +17,7 @@ import type {
   Layer,
   NodeStyle,
   Pathway,
+  PathwayDraft,
   Selection,
 } from "../../../domain/types";
 import {
@@ -27,7 +28,8 @@ import {
 import {
   fullLayerPath,
   leafLayers,
-  nodePathways,
+  nodePathwayContext,
+  pathwayCandidateNodes,
   styleReferenceCount,
 } from "../../../domain/selectors";
 import {
@@ -122,7 +124,7 @@ export function Inspector({
       <div className="inspector-heading">
         <div>
           <span className="eyebrow">Inspector</span>
-          <h2>{title(createKind, selection?.kind, tool)}</h2>
+          <h2>{title(createKind, selection?.kind, tool, Boolean(draft?.pathwayId))}</h2>
         </div>
         <button
           className="panel-close"
@@ -139,8 +141,13 @@ export function Inspector({
   );
 }
 
-function title(create: CreateKind, selection?: string, tool?: string): string {
-  if (tool === "connectPathway") return "新建通路";
+function title(
+  create: CreateKind,
+  selection?: string,
+  tool?: string,
+  editingPathway = false,
+): string {
+  if (tool === "connectPathway") return editingPathway ? "编辑通路" : "新建通路";
   if (create === "batch") return "批量添加";
   if (create)
     return `新建${({ layer: "层级", node: "节点", nodeStyle: "样式", pathway: "通路" } as const)[create]}`;
@@ -505,11 +512,21 @@ function LayerForm({
   const execute = useEditorStore((s) => s.execute);
   const select = useEditorStore((s) => s.select);
   const dialog = useAppDialog();
+  const nextLayerOrder = (targetParentId: string) =>
+    Math.max(
+      0,
+      ...diagram.layers
+        .filter((item) => item.parentId === (targetParentId || null))
+        .map((item) => item.order),
+    ) + 10;
   const [name, setName] = useState(layer?.name ?? "");
   const [parentId, setParentId] = useState<string>(layer?.parentId ?? "");
-  const [order, setOrder] = useState(layer?.order ?? 10);
+  const [order, setOrder] = useState(layer?.order ?? nextLayerOrder(layer?.parentId ?? ""));
   const [description, setDescription] = useState(layer?.description ?? "");
   const [target, setTarget] = useState("");
+  useEffect(() => {
+    if (!layer) setOrder(nextLayerOrder(parentId));
+  }, [diagram.layers, layer, parentId]);
   if (mode === "view" && layer)
     return (
       <div className="detail-stack">
@@ -572,7 +589,7 @@ function LayerForm({
     }
     setName(layer?.name ?? "");
     setParentId(layer?.parentId ?? "");
-    setOrder(layer?.order ?? 10);
+    setOrder(layer?.order ?? nextLayerOrder(layer?.parentId ?? ""));
     setDescription(layer?.description ?? "");
     setTarget("");
   };
@@ -700,7 +717,7 @@ function NodeForm({
   useEffect(() => {
     if (!node && contextualLayerId) setLayerId(contextualLayerId);
   }, [contextualLayerId, node, selection]);
-  const participations = node ? nodePathways(diagram, node.id) : [];
+  const pathwayContext = node ? nodePathwayContext(diagram, node.id) : null;
   if (mode === "view" && node)
     return (
       <div className="detail-stack">
@@ -726,11 +743,19 @@ function NodeForm({
         />
         <Detail label="业务备注" value={node.description || "暂无"} />
         <Detail
-          label="参与通路"
+          label={`可见通路（${pathwayContext?.visiblePathways.length ?? 0}）`}
           value={
-            participations.length
-              ? participations.map((x) => x.name).join("、")
-              : "未参与通路"
+            pathwayContext?.visiblePathways.length
+              ? pathwayContext.visiblePathways.map((pathway) => pathway.name).join("、")
+              : "无"
+          }
+        />
+        <Detail
+          label={`隐藏通路（${pathwayContext?.hiddenPathways.length ?? 0}）`}
+          value={
+            pathwayContext?.hiddenPathways.length
+              ? pathwayContext.hiddenPathways.map((pathway) => pathway.name).join("、")
+              : "无"
           }
         />
       </div>
@@ -858,6 +883,14 @@ function NodeForm({
           onChange={(e) => setDescription(e.target.value)}
         />
       </Field>
+      {node && pathwayContext && (
+        <p className="inline-info">
+          参与 {pathwayContext.visiblePathways.length} 条可见通路
+          {pathwayContext.hiddenPathways.length
+            ? `，另有 ${pathwayContext.hiddenPathways.length} 条隐藏通路`
+            : ""}
+        </p>
+      )}
       <FormFooter onCancel={cancel} onConfirm={submit} />
       {node && (
         <>
@@ -1140,6 +1173,7 @@ function PathwayForm({
   const diagram = useEditorStore((s) => s.diagram)!;
   const execute = useEditorStore((s) => s.execute);
   const select = useEditorStore((s) => s.select);
+  const startPathwayDraft = useEditorStore((s) => s.startPathwayDraft);
   const dialog = useAppDialog();
   const [name, setName] = useState(pathway?.name ?? "");
   const [nodeIds, setNodeIds] = useState(
@@ -1155,7 +1189,6 @@ function PathwayForm({
   );
   const [description, setDescription] = useState(pathway?.description ?? "");
   const [visible, setVisible] = useState(pathway?.visible ?? true);
-  const [addId, setAddId] = useState("");
   if (mode === "view" && pathway)
     return (
       <div className="detail-stack">
@@ -1182,12 +1215,21 @@ function PathwayForm({
         <Detail label="备注" value={pathway.description || "暂无"} />
       </div>
     );
-  const move = (index: number, delta: number) => {
-    const next = [...nodeIds];
-    const target = index + delta;
-    if (target < 0 || target >= next.length) return;
-    [next[index], next[target]] = [next[target]!, next[index]!];
-    setNodeIds(next);
+  const beginStepEdit = (
+    nextNodeIds: string[],
+    candidateAction: PathwayDraft["candidateAction"],
+  ) => {
+    if (!pathway) return;
+    startPathwayDraft({
+      pathwayId: pathway.id,
+      name,
+      nodeIds: nextNodeIds,
+      color,
+      lineStyle,
+      description,
+      visible,
+      candidateAction,
+    });
   };
   const submit = (event?: FormEvent) => {
     event?.preventDefault();
@@ -1229,7 +1271,6 @@ function PathwayForm({
     setLineStyle(pathway?.lineStyle ?? "solid");
     setDescription(pathway?.description ?? "");
     setVisible(pathway?.visible ?? true);
-    setAddId("");
   };
   const remove = async () => {
     if (!pathway || !await dialog.confirm({
@@ -1253,36 +1294,13 @@ function PathwayForm({
         />
       </Field>
       <Field label="有序节点列表" required>
-        <StepList
+        <StepRail
           nodeIds={nodeIds}
-          onMove={move}
-          onRemove={(index) =>
-            setNodeIds(nodeIds.filter((_, i) => i !== index))
-          }
+          onInsert={(index) => beginStepEdit(nodeIds, { kind: "insert", index })}
+          onReplace={(index) => beginStepEdit(nodeIds, { kind: "replace", index })}
+          onRemove={(index) => beginStepEdit(nodeIds.filter((_, itemIndex) => itemIndex !== index), null)}
         />
       </Field>
-      <div className="add-step">
-        <select value={addId} onChange={(e) => setAddId(e.target.value)}>
-          <option value="">选择要添加的节点</option>
-          {diagram.nodes
-            .filter((x) => !nodeIds.includes(x.id))
-            .map((x) => (
-              <option key={x.id} value={x.id}>
-                {x.name} · {fullLayerPath(diagram, x.layerId)}
-              </option>
-            ))}
-        </select>
-        <button
-          type="button"
-          disabled={!addId}
-          onClick={() => {
-            setNodeIds([...nodeIds, addId]);
-            setAddId("");
-          }}
-        >
-          添加
-        </button>
-      </div>
       {nodeIds.length < 2 && (
         <p className="field-error">至少添加两个不同节点</p>
       )}
@@ -1340,20 +1358,64 @@ function DraftPathwayForm() {
   const setTool = useEditorStore((s) => s.setTool);
   const execute = useEditorStore((s) => s.execute);
   const select = useEditorStore((s) => s.select);
-  const move = (index: number, delta: number) => {
-    const ids = [...draft.nodeIds];
-    const target = index + delta;
-    if (target < 0 || target >= ids.length) return;
-    [ids[index], ids[target]] = [ids[target]!, ids[index]!];
-    setDraft({ ...draft, nodeIds: ids });
+  const [candidateQuery, setCandidateQuery] = useState("");
+  const candidateState = useMemo(() => {
+    const action = draft.candidateAction;
+    if (!action) return { candidates: [] as DiagramNode[], insertAt: -1 };
+    const baseIds = action.kind === "replace"
+      ? draft.nodeIds.filter((_, index) => index !== action.index)
+      : draft.nodeIds;
+    return {
+      candidates: pathwayCandidateNodes(diagram, baseIds, action.index),
+      insertAt: action.index,
+    };
+  }, [diagram, draft.candidateAction, draft.nodeIds]);
+  const normalizedQuery = candidateQuery.trim().toLocaleLowerCase();
+  const candidateGroups = useMemo(() => {
+    const groups = new Map<string, DiagramNode[]>();
+    candidateState.candidates
+      .filter((node) =>
+        !normalizedQuery ||
+        node.name.toLocaleLowerCase().includes(normalizedQuery) ||
+        fullLayerPath(diagram, node.layerId).toLocaleLowerCase().includes(normalizedQuery),
+      )
+      .forEach((node) => {
+        const path = fullLayerPath(diagram, node.layerId);
+        groups.set(path, [...(groups.get(path) ?? []), node]);
+      });
+    return [...groups.entries()];
+  }, [candidateState.candidates, diagram, normalizedQuery]);
+  const activateCandidate = (candidateAction: PathwayDraft["candidateAction"]) => {
+    setCandidateQuery("");
+    setDraft({ ...draft, candidateAction });
   };
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
+  const chooseCandidate = (nodeId: string) => {
+    const action = draft.candidateAction;
+    if (!action || !candidateState.candidates.some((node) => node.id === nodeId)) return;
+    const nodeIds = [...draft.nodeIds];
+    if (action.kind === "replace") nodeIds[action.index] = nodeId;
+    else nodeIds.splice(action.index, 0, nodeId);
+    setDraft({
+      ...draft,
+      nodeIds,
+      candidateAction:
+        draft.pathwayId === null && action.kind === "insert"
+          ? { kind: "insert", index: action.index + 1 }
+          : null,
+    });
+    setCandidateQuery("");
+  };
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault();
     const before = new Set(diagram.pathways.map((pathway) => pathway.id));
-    if (execute("新建通路", (d) => createPathway(d, draft))) {
-      const created = useEditorStore
-        .getState()
-        .diagram?.pathways.find((pathway) => !before.has(pathway.id));
+    if (execute(draft.pathwayId ? "更新通路" : "新建通路", (current) =>
+      draft.pathwayId
+        ? updatePathway(current, draft.pathwayId, draft)
+        : createPathway(current, draft),
+    )) {
+      const created = draft.pathwayId
+        ? useEditorStore.getState().diagram?.pathways.find((pathway) => pathway.id === draft.pathwayId)
+        : useEditorStore.getState().diagram?.pathways.find((pathway) => !before.has(pathway.id));
       setTool("select");
       if (created) select({ kind: "pathway", id: created.id });
     }
@@ -1361,7 +1423,7 @@ function DraftPathwayForm() {
   return (
     <form className="property-form" onSubmit={submit}>
       <p className="inline-info">
-        依次在画布点击节点。这里的顺序会实时决定候选箭头方向。
+        通路只能从上层指向下层。选择一个插入位置后，可在下方候选列表或画布添加合法节点。
       </p>
       <Field label="通路名称" required>
         <input
@@ -1373,17 +1435,64 @@ function DraftPathwayForm() {
         />
       </Field>
       <Field label="已选节点" required>
-        <StepList
+        <StepRail
           nodeIds={draft.nodeIds}
-          onMove={move}
-          onRemove={(index) =>
-            setDraft({
-              ...draft,
-              nodeIds: draft.nodeIds.filter((_, i) => i !== index),
-            })
-          }
+          activeAction={draft.candidateAction}
+          onInsert={(index) => activateCandidate({ kind: "insert", index })}
+          onReplace={(index) => activateCandidate({ kind: "replace", index })}
+          onRemove={(index) => setDraft({
+            ...draft,
+            nodeIds: draft.nodeIds.filter((_, itemIndex) => itemIndex !== index),
+            candidateAction: null,
+          })}
         />
       </Field>
+      {draft.candidateAction && (
+        <section className="candidate-picker" aria-label="合法候选节点">
+          <div className="candidate-heading">
+            <strong>
+              {draft.candidateAction.kind === "replace" ? "选择替换节点" : "选择插入节点"}
+            </strong>
+            <button type="button" onClick={() => activateCandidate(null)}>关闭</button>
+          </div>
+          <label className="candidate-search">
+            <span>搜索候选节点</span>
+            <input
+              value={candidateQuery}
+              onChange={(event) => setCandidateQuery(event.target.value)}
+              placeholder="节点名称或层级路径"
+            />
+          </label>
+          <div
+            className="candidate-groups"
+            role={candidateGroups.length ? "listbox" : "status"}
+            aria-label="可加入通路的节点"
+          >
+            {candidateGroups.map(([path, nodes]) => (
+              <div className="candidate-group" key={path} role="group" aria-label={path}>
+                <small>{path}</small>
+                {nodes.map((node) => (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected="false"
+                    key={node.id}
+                    onClick={() => chooseCandidate(node.id)}
+                  >
+                    <span>{node.name}</span>
+                    <em>加入</em>
+                  </button>
+                ))}
+              </div>
+            ))}
+            {!candidateGroups.length && (
+              <p className="candidate-empty">
+                {normalizedQuery ? "没有匹配的合法节点" : "这个位置没有可连接的节点"}
+              </p>
+            )}
+          </div>
+        </section>
+      )}
       {draft.nodeIds.length < 2 && (
         <p className="field-error">
           请再选择 {2 - draft.nodeIds.length} 个节点
@@ -1412,69 +1521,121 @@ function DraftPathwayForm() {
           </select>
         </Field>
       </div>
+      <Field label="备注">
+        <textarea
+          value={draft.description}
+          onChange={(event) => setDraft({ ...draft, description: event.target.value })}
+        />
+      </Field>
+      <label className="check-row">
+        <input
+          type="checkbox"
+          checked={draft.visible}
+          onChange={(event) => setDraft({ ...draft, visible: event.target.checked })}
+        />
+        在画布中显示
+      </label>
       <div className="form-footer draft-form-footer">
-        <small>
-          选满两个节点后，请在最后一个节点旁完成；也可在画布按 Enter。
-        </small>
-        <button type="button" onClick={() => setTool("select")}>
-          取消
+        <small>至少两个节点后可按 Enter 或“确定”提交。</small>
+        <button type="button" onClick={() => setTool("select")}>取消</button>
+        <button
+          type="button"
+          className="primary-button"
+          disabled={draft.nodeIds.length < 2}
+          onClick={() => submit()}
+        >
+          确定
         </button>
       </div>
     </form>
   );
 }
 
-function StepList({
+function StepRail({
   nodeIds,
-  onMove,
+  activeAction,
+  onInsert,
+  onReplace,
   onRemove,
 }: {
   nodeIds: string[];
-  onMove: (index: number, delta: number) => void;
+  activeAction?: PathwayDraft["candidateAction"];
+  onInsert: (index: number) => void;
+  onReplace: (index: number) => void;
   onRemove: (index: number) => void;
 }) {
   const diagram = useEditorStore((s) => s.diagram)!;
   return (
-    <ol className="step-list">
-      {nodeIds.map((id, index) => {
-        const node = diagram.nodes.find((x) => x.id === id);
+    <div className="step-rail" role="group" aria-label="通路步骤">
+      {Array.from({ length: nodeIds.length + 1 }, (_, gapIndex) => {
+        const gapLabel = !nodeIds.length
+          ? "选择首个节点"
+          : gapIndex === 0
+            ? "添加上游节点"
+            : gapIndex === nodeIds.length
+              ? "添加下游节点"
+              : `在第 ${gapIndex} 和第 ${gapIndex + 1} 步之间添加节点`;
+        const stepIndex = gapIndex;
+        const id = nodeIds[stepIndex];
+        const node = id ? diagram.nodes.find((item) => item.id === id) : undefined;
+        const insertActive = activeAction?.kind === "insert" && activeAction.index === gapIndex;
         return (
-          <li key={id}>
-            <b>{index + 1}</b>
-            <span>
-              <strong>{node?.name ?? "未知节点"}</strong>
-              <small>{node ? fullLayerPath(diagram, node.layerId) : ""}</small>
-            </span>
-            <span className="step-actions">
-              <button
-                type="button"
-                disabled={index === 0}
-                onClick={() => onMove(index, -1)}
-                aria-label={`上移 ${node?.name}`}
-              >
-                ↑
-              </button>
-              <button
-                type="button"
-                disabled={index === nodeIds.length - 1}
-                onClick={() => onMove(index, 1)}
-                aria-label={`下移 ${node?.name}`}
-              >
-                ↓
-              </button>
-              <button
-                type="button"
-                onClick={() => onRemove(index)}
-                aria-label={`移除 ${node?.name}`}
-              >
-                ×
-              </button>
-            </span>
-          </li>
+          <div className="step-rail-segment" key={`gap-${gapIndex}`}>
+            <button
+              type="button"
+              className={`step-gap-button ${insertActive ? "active" : ""}`}
+              aria-pressed={insertActive}
+              onClick={() => onInsert(gapIndex)}
+            >
+              ＋ {gapLabel}
+            </button>
+            {id && (
+              <div className="step-item">
+                <b>{stepIndex + 1}</b>
+                <span>
+                  <strong>{node?.name ?? "未知节点"}</strong>
+                  <small>{node ? fullLayerPath(diagram, node.layerId) : ""}</small>
+                </span>
+                <span className="step-actions">
+                  <button
+                    type="button"
+                    onClick={() => focusCanvasNode(id)}
+                    aria-label={`定位 ${node?.name ?? "未知节点"}`}
+                    title="在画布定位"
+                  >
+                    ◎
+                  </button>
+                  <button
+                    type="button"
+                    className={activeAction?.kind === "replace" && activeAction.index === stepIndex ? "active" : ""}
+                    onClick={() => onReplace(stepIndex)}
+                    aria-label={`替换 ${node?.name ?? "未知节点"}`}
+                    title="替换节点"
+                  >
+                    ⇄
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRemove(stepIndex)}
+                    aria-label={`移除 ${node?.name ?? "未知节点"}`}
+                    title="移除节点"
+                  >
+                    ×
+                  </button>
+                </span>
+              </div>
+            )}
+          </div>
         );
       })}
-    </ol>
+    </div>
   );
+}
+
+function focusCanvasNode(nodeId: string): void {
+  const element = [...document.querySelectorAll<HTMLElement>(".react-flow__node")]
+    .find((candidate) => candidate.dataset.id === nodeId);
+  element?.focus();
 }
 function StylePreview({
   form,

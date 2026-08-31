@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAppDialog } from "../../app/AppDialog";
 import { usesSharedJsonRepository } from "../../app/runtime";
-import { createPathway } from "../../editor/commands";
+import { createPathway, updatePathway } from "../../editor/commands";
 import { useEditorStore } from "../../editor/store";
 import type { EditorMode } from "../../domain/types";
+import { nodePathwayContext } from "../../domain/selectors";
 import { ObjectPanel } from "./components/ObjectPanel";
 import { PathwayCanvas } from "./components/PathwayCanvas";
 import { Inspector } from "./components/Inspector";
@@ -37,12 +38,6 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
     else void current.load(diagramId, mode);
   }, [diagramId, mode]);
   useEffect(() => {
-    const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (useEditorStore.getState().saveState === "dirty") {
-        event.preventDefault();
-        event.returnValue = "";
-      }
-    };
     const onKey = (event: KeyboardEvent) => {
       const current = useEditorStore.getState();
       const target = event.target as HTMLElement | null;
@@ -92,18 +87,21 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
         current.pathwayDraft &&
         current.pathwayDraft.nodeIds.length >= 2
       ) {
+        event.preventDefault();
         const draft = current.pathwayDraft;
         const before = new Set(
           current.diagram?.pathways.map((pathway) => pathway.id),
         );
         if (
-          current.execute("新建通路", (diagram) =>
-            createPathway(diagram, draft),
+          current.execute(draft.pathwayId ? "更新通路" : "新建通路", (diagram) =>
+            draft.pathwayId
+              ? updatePathway(diagram, draft.pathwayId, draft)
+              : createPathway(diagram, draft),
           )
         ) {
-          const created = useEditorStore
-            .getState()
-            .diagram?.pathways.find((pathway) => !before.has(pathway.id));
+          const created = draft.pathwayId
+            ? useEditorStore.getState().diagram?.pathways.find((pathway) => pathway.id === draft.pathwayId)
+            : useEditorStore.getState().diagram?.pathways.find((pathway) => !before.has(pathway.id));
           current.setTool("select");
           if (created) current.select({ kind: "pathway", id: created.id });
         }
@@ -115,17 +113,26 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
       else if (event.key.toLocaleLowerCase() === "v") current.setTool("select");
       else if (event.key.toLocaleLowerCase() === "h") current.setTool("pan");
     };
-    window.addEventListener("beforeunload", onBeforeUnload);
     window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("beforeunload", onBeforeUnload);
       window.removeEventListener("keydown", onKey);
     };
   }, []);
+  const returnToGallery = async () => {
+    if (
+      (state.saveState === "dirty" || state.saveState === "saveError") &&
+      !await dialog.confirm({
+        title: "返回通路图库",
+        message: "当前有未保存修改。个人草稿已经保留，确定返回图库吗？",
+        confirmLabel: "返回图库",
+      })
+    ) return;
+    navigate("/diagrams");
+  };
   const switchMode = async (next: EditorMode) => {
     if (next === mode) return;
     if (
-      state.saveState === "dirty" &&
+      (state.saveState === "dirty" || state.saveState === "saveError") &&
       next === "view" &&
       !await dialog.confirm({
         title: "切换到查看模式",
@@ -152,6 +159,16 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
       </div>
     );
   const diagram = state.diagram;
+  const highlightedNode =
+    state.selection?.kind === "node" && state.multiSelectedNodeIds.length === 1
+      ? state.selection.id
+      : null;
+  const highlightContext = highlightedNode
+    ? nodePathwayContext(diagram, highlightedNode)
+    : null;
+  const highlightStatus = highlightContext
+    ? `已高亮 ${highlightContext.visiblePathways.length} 条可见通路、${highlightContext.relatedNodeIds.size} 个关联节点${highlightContext.hiddenPathways.length ? `；另有 ${highlightContext.hiddenPathways.length} 条隐藏通路` : ""}`
+    : "";
   const issueCount = 0;
   return (
     <div className="workspace-shell">
@@ -165,7 +182,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
         <div className="breadcrumb">
           <button
             className="logo-button"
-            onClick={() => navigate("/diagrams")}
+            onClick={() => void returnToGallery()}
             aria-label="返回通路图库"
           >
             <span className="product-mark">路</span>
@@ -294,7 +311,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
             : "未选择节点"}
         </span>
         <span aria-live="polite">
-          {state.message || `${issueCount} 个校验问题`}
+          {state.message || highlightStatus || `${issueCount} 个校验问题`}
         </span>
         <span>
           {diagram.layers.length} 层 · {diagram.nodes.length} 节点 ·{" "}

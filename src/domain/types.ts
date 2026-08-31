@@ -105,8 +105,15 @@ export interface DiagramSummary {
 }
 
 export interface PathwayDraft {
+  pathwayId: PathwayId | null;
   name: string;
   nodeIds: NodeId[];
   color: string;
   lineStyle: "solid" | "dashed";
+  description: string;
+  visible: boolean;
+  candidateAction:
+    | { kind: "insert"; index: number }
+    | { kind: "replace"; index: number }
+    | null;
 }

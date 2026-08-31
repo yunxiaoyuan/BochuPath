@@ -43,6 +43,7 @@ interface EditorState {
   select: (selection: Selection, additive?: boolean) => void;
   focusPathway: (id: string | null) => void;
   setPathwayDraft: (draft: PathwayDraft | null) => void;
+  startPathwayDraft: (draft: PathwayDraft) => void;
   undo: () => void;
   redo: () => void;
   save: () => Promise<void>;
@@ -114,7 +115,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       );
       return true;
     } catch (error) {
-      set({ message: domainMessage(error) });
+      set({ message: domainMessage(error, state.diagram) });
       return false;
     }
   },
@@ -137,10 +138,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       set({
         tool,
         pathwayDraft: {
+          pathwayId: null,
           name: "新通路",
           nodeIds: [],
           color: "#2F64F7",
           lineStyle: "solid",
+          description: "",
+          visible: true,
+          candidateAction: { kind: "insert", index: 0 },
         },
         selection: { kind: "pathwayDraft", id: "new" },
         multiSelectedNodeIds: [],
@@ -206,6 +211,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
   },
   setPathwayDraft: (pathwayDraft) => set({ pathwayDraft }),
+  startPathwayDraft: (pathwayDraft) =>
+    set({
+      tool: "connectPathway",
+      pathwayDraft,
+      selection: pathwayDraft.pathwayId
+        ? { kind: "pathway", id: pathwayDraft.pathwayId }
+        : { kind: "pathwayDraft", id: "new" },
+      multiSelectedNodeIds: [],
+      focusedPathwayId: pathwayDraft.pathwayId,
+    }),
   undo: () => {
     const state = get();
     if (state.mode !== "edit" || !state.diagram) return;
@@ -325,8 +340,14 @@ function queueDraft(
   }, 500);
 }
 
-function domainMessage(error: unknown): string {
-  if (error instanceof DomainError) return error.issue.message;
+function domainMessage(error: unknown, diagram?: Diagram | null): string {
+  if (error instanceof DomainError) {
+    const pathwayId = error.issue.path?.match(/^pathways\.([^.]+)/)?.[1];
+    const pathway = pathwayId
+      ? diagram?.pathways.find((item) => item.id === pathwayId)
+      : undefined;
+    return pathway ? `${error.issue.message}：${pathway.name}` : error.issue.message;
+  }
   if (error instanceof Error && error.message in errorMessages)
     return errorMessages[error.message as keyof typeof errorMessages];
   return "操作失败，请稍后重试";
