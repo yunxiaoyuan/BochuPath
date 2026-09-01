@@ -25,6 +25,10 @@ import {
   validateDiagram,
 } from "../../../domain/rules";
 import {
+  pathwayEdgeCount,
+  pathwayLayerGroups,
+} from "../../../domain/layer-order";
+import {
   fullLayerPath,
   leafLayers,
   nodePathwayContext,
@@ -50,7 +54,7 @@ import {
   updateLayoutConfig,
   updateNode,
   updateNodeStyle,
-  updatePathway,
+  updatePathwayMetadata,
 } from "../../../editor/commands";
 import { parseBatchNames } from "../../../editor/batch-input";
 import { useEditorStore } from "../../../editor/store";
@@ -122,7 +126,7 @@ export function Inspector({
       <div className="inspector-heading">
         <div>
           <span className="eyebrow">Inspector</span>
-          <h2>{title(createKind, selection?.kind, tool, Boolean(draft?.pathwayId))}</h2>
+          <h2>{title(createKind, selection?.kind, tool)}</h2>
         </div>
         <button
           className="panel-close"
@@ -143,9 +147,8 @@ function title(
   create: CreateKind,
   selection?: string,
   tool?: string,
-  editingPathway = false,
 ): string {
-  if (tool === "connectPathway") return editingPathway ? "编辑通路" : "新建通路";
+  if (tool === "connectPathway") return "新建通路";
   if (create === "batch") return "批量添加";
   if (create)
     return `新建${({ layer: "层级", node: "节点", nodeStyle: "样式", pathway: "通路" } as const)[create]}`;
@@ -816,7 +819,7 @@ function NodeForm({
   const remove = async () => {
     if (!node || blocked || !await dialog.confirm({
       title: "删除节点",
-      message: `删除“${node.name}”？${impact.length ? ` 将从 ${impact.length} 条通路中移除并自动重连相邻步骤。` : ""}`,
+      message: `删除“${node.name}”？${impact.length ? ` 将从 ${impact.length} 条通路中移除，并按新的相邻占用层重新派生连线。` : ""}`,
       confirmLabel: "删除",
       destructive: true,
     })) return;
@@ -1171,16 +1174,10 @@ function PathwayForm({
   const diagram = useEditorStore((s) => s.diagram)!;
   const execute = useEditorStore((s) => s.execute);
   const select = useEditorStore((s) => s.select);
-  const startPathwayDraft = useEditorStore((s) => s.startPathwayDraft);
   const dialog = useAppDialog();
   const [name, setName] = useState(pathway?.name ?? "");
-  const [nodeIds, setNodeIds] = useState(
-    pathway
-      ? [...pathway.steps]
-          .sort((a, b) => a.order - b.order)
-          .map((x) => x.nodeId)
-      : [],
-  );
+  const nodeIds = pathway?.nodeIds ?? [];
+  const occupiedLayerCount = pathwayLayerGroups(diagram, nodeIds).length;
   const [color, setColor] = useState(pathway?.color ?? "#2F64F7");
   const [lineStyle, setLineStyle] = useState<Pathway["lineStyle"]>(
     pathway?.lineStyle ?? "solid",
@@ -1191,21 +1188,7 @@ function PathwayForm({
     return (
       <div className="detail-stack">
         <Detail label="通路名称" value={pathway.name} />
-        <ol className="readonly-steps">
-          {[...pathway.steps]
-            .sort((a, b) => a.order - b.order)
-            .map((step) => {
-              const node = diagram.nodes.find((x) => x.id === step.nodeId);
-              return (
-                <li key={step.id}>
-                  <strong>{node?.name}</strong>
-                  <span>
-                    {node ? fullLayerPath(diagram, node.layerId) : "未知节点"}
-                  </span>
-                </li>
-              );
-            })}
-        </ol>
+        <PathwayGraphSummary nodeIds={pathway.nodeIds} />
         <Detail
           label="线型"
           value={pathway.lineStyle === "solid" ? "实线" : "虚线"}
@@ -1213,18 +1196,6 @@ function PathwayForm({
         <Detail label="备注" value={pathway.description || "暂无"} />
       </div>
     );
-  const beginStepEdit = () => {
-    if (!pathway) return;
-    startPathwayDraft({
-      pathwayId: pathway.id,
-      name,
-      nodeIds,
-      color,
-      lineStyle,
-      description,
-      visible,
-    });
-  };
   const submit = (event?: FormEvent) => {
     event?.preventDefault();
     const before = new Set(diagram.pathways.map((x) => x.id));
@@ -1237,8 +1208,8 @@ function PathwayForm({
       visible,
       order: pathway?.order,
     };
-    const ok = execute(pathway ? "更新通路" : "新建通路", (d) =>
-      pathway ? updatePathway(d, pathway.id, input) : createPathway(d, input),
+    const ok = execute(pathway ? "更新通路属性" : "新建通路", (d) =>
+      pathway ? updatePathwayMetadata(d, pathway.id, input) : createPathway(d, input),
     );
     if (ok) {
       const created = useEditorStore
@@ -1254,13 +1225,6 @@ function PathwayForm({
       return;
     }
     setName(pathway?.name ?? "");
-    setNodeIds(
-      pathway
-        ? [...pathway.steps]
-            .sort((a, b) => a.order - b.order)
-            .map((step) => step.nodeId)
-        : [],
-    );
     setColor(pathway?.color ?? "#2F64F7");
     setLineStyle(pathway?.lineStyle ?? "solid");
     setDescription(pathway?.description ?? "");
@@ -1287,19 +1251,16 @@ function PathwayForm({
           onChange={(e) => setName(e.target.value)}
         />
       </Field>
-      <Field label="通路节点" required>
-        <PathwayStepSummary nodeIds={nodeIds} />
+      <Field label="通路图节点" required>
+        <PathwayGraphSummary nodeIds={nodeIds} />
         {pathway && (
           <div className="canvas-edit-entry">
-            <p>进入编辑后，普通点击仍用于选择节点，Shift+点击加入或移除；顺序由画布自动确定。</p>
-            <button type="button" className="primary-button" onClick={beginStepEdit}>
-              在画布编辑节点
-            </button>
+            <p>当前通路已可直接编辑：Shift+点击节点立即加入或移除；普通点击节点将退出通路编辑。</p>
           </div>
         )}
       </Field>
-      {nodeIds.length < 2 && (
-        <p className="field-error">至少添加两个不同节点</p>
+      {occupiedLayerCount < 2 && (
+        <p className="field-error">通路至少需要占用两个不同层级</p>
       )}
       <div className="field-grid">
         <Field label="颜色">
@@ -1335,7 +1296,7 @@ function PathwayForm({
         />
         在画布中显示
       </label>
-      <FormFooter onCancel={cancel} onConfirm={submit} disabled={nodeIds.length < 2} />
+      <FormFooter onCancel={cancel} onConfirm={submit} disabled={!pathway && occupiedLayerCount < 2} />
       {pathway && (
         <DangerZone>
           <p>删除通路不会删除其中的节点。</p>
@@ -1355,17 +1316,12 @@ function DraftPathwayForm() {
   const setTool = useEditorStore((s) => s.setTool);
   const execute = useEditorStore((s) => s.execute);
   const select = useEditorStore((s) => s.select);
+  const occupiedLayerCount = pathwayLayerGroups(diagram, draft.nodeIds).length;
   const submit = (event?: FormEvent) => {
     event?.preventDefault();
     const before = new Set(diagram.pathways.map((pathway) => pathway.id));
-    if (execute(draft.pathwayId ? "更新通路" : "新建通路", (current) =>
-      draft.pathwayId
-        ? updatePathway(current, draft.pathwayId, draft)
-        : createPathway(current, draft),
-    )) {
-      const created = draft.pathwayId
-        ? useEditorStore.getState().diagram?.pathways.find((pathway) => pathway.id === draft.pathwayId)
-        : useEditorStore.getState().diagram?.pathways.find((pathway) => !before.has(pathway.id));
+    if (execute("新建通路", (current) => createPathway(current, draft))) {
+      const created = useEditorStore.getState().diagram?.pathways.find((pathway) => !before.has(pathway.id));
       setTool("select");
       if (created) select({ kind: "pathway", id: created.id });
     }
@@ -1373,10 +1329,7 @@ function DraftPathwayForm() {
   return (
     <form className="property-form" onSubmit={submit}>
       <p className="inline-info">
-        {draft.pathwayId
-          ? "普通点击仍用于选择节点；Shift+点击可将节点加入通路，或从通路移除。"
-          : "点击未选节点加入，Shift+点击已选节点移除。"}
-        通路自动按层级和同层节点的固定顺序连接。
+        点击未选节点加入，Shift+点击已选节点移除。相邻占用层之间自动全连接。
       </p>
       <Field label="通路名称" required>
         <input
@@ -1387,13 +1340,11 @@ function DraftPathwayForm() {
           onChange={(e) => setDraft({ ...draft, name: e.target.value })}
         />
       </Field>
-      <Field label="当前步骤" required>
-        <PathwayStepSummary nodeIds={draft.nodeIds} />
+      <Field label="通路图节点" required>
+        <PathwayGraphSummary nodeIds={draft.nodeIds} />
       </Field>
-      {draft.nodeIds.length < 2 && (
-        <p className="field-error">
-          请再选择 {2 - draft.nodeIds.length} 个节点
-        </p>
+      {occupiedLayerCount < 2 && (
+        <p className="field-error">请从至少两个不同层级选择节点</p>
       )}
       <div className="field-grid">
         <Field label="颜色">
@@ -1433,12 +1384,12 @@ function DraftPathwayForm() {
         在画布中显示
       </label>
       <div className="form-footer draft-form-footer">
-        <small>至少两个节点后可按 Enter 或“确定”提交。</small>
+        <small>至少占用两个层级后可按 Enter 或“确定”创建。</small>
         <button type="button" onClick={() => setTool("select")}>取消</button>
         <button
           type="button"
           className="primary-button"
-          disabled={draft.nodeIds.length < 2}
+          disabled={occupiedLayerCount < 2}
           onClick={() => submit()}
         >
           确定
@@ -1448,24 +1399,25 @@ function DraftPathwayForm() {
   );
 }
 
-function PathwayStepSummary({ nodeIds }: { nodeIds: string[] }) {
+function PathwayGraphSummary({ nodeIds }: { nodeIds: string[] }) {
   const diagram = useEditorStore((s) => s.diagram)!;
+  const groups = pathwayLayerGroups(diagram, nodeIds);
+  const edgeCount = pathwayEdgeCount(diagram, nodeIds);
   return (
-    <ol className="pathway-step-summary" aria-label="通路步骤">
-      {nodeIds.map((id, index) => {
-        const node = diagram.nodes.find((item) => item.id === id);
-        return (
-          <li key={id}>
-            <b>{index + 1}</b>
-            <span>
-              <strong>{node?.name ?? "未知节点"}</strong>
-              <small>{node ? fullLayerPath(diagram, node.layerId) : ""}</small>
-            </span>
+    <div className="pathway-graph-summary" aria-label="通路图结构">
+      <p className="pathway-graph-metrics">
+        {nodeIds.length} 个节点 · {groups.length} 个占用层 · {edgeCount} 条边
+      </p>
+      <ol>
+        {groups.map((group) => (
+          <li key={group.layer.id}>
+            <strong>{fullLayerPath(diagram, group.layer.id)}</strong>
+            <span>{group.nodes.map((node) => node.name).join("、")}</span>
           </li>
-        );
-      })}
-      {!nodeIds.length && <li className="empty">请在画布上选择第一个节点</li>}
-    </ol>
+        ))}
+        {!groups.length && <li className="empty">请在画布上选择第一个节点</li>}
+      </ol>
+    </div>
   );
 }
 function StylePreview({

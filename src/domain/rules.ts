@@ -1,11 +1,11 @@
-import { sortPathwayNodeIds } from './layer-order';
+import { pathwayLayerGroups, sortPathwayNodeIds } from './layer-order';
 import type { Diagram, Layer } from './types';
 
 export type DomainErrorCode =
   | 'SCHEMA_VERSION_UNSUPPORTED' | 'REFERENCE_NOT_FOUND' | 'LAYER_CYCLE' | 'LAYER_SIBLING_NAME_DUPLICATE'
   | 'LAYER_NODE_REQUIRES_LEAF' | 'LAYER_MIGRATION_TARGET_INVALID' | 'NODE_LAYER_NOT_LEAF' | 'NODE_STYLE_NOT_FOUND'
   | 'NODE_DELETE_BREAKS_PATHWAY' | 'STYLE_DEFAULT_DELETE_FORBIDDEN' | 'STYLE_IN_USE_REPLACEMENT_REQUIRED'
-  | 'PATHWAY_MIN_STEPS' | 'PATHWAY_DUPLICATE_NODE' | 'PATHWAY_LAYER_ORDER_INVALID'
+  | 'PATHWAY_MIN_LAYERS' | 'PATHWAY_DUPLICATE_NODE'
   | 'PERSISTENCE_CONFLICT' | 'PERSISTENCE_FAILED' | 'FIELD_INVALID';
 
 export interface DomainIssue { code: DomainErrorCode; path?: string; message: string }
@@ -18,10 +18,9 @@ export const errorMessages: Record<DomainErrorCode, string> = {
   SCHEMA_VERSION_UNSUPPORTED: '数据版本不受支持', REFERENCE_NOT_FOUND: '对象引用不存在', LAYER_CYCLE: '层级不能移动到自己或后代中',
   LAYER_SIBLING_NAME_DUPLICATE: '同一上级下不能有重名层级', LAYER_NODE_REQUIRES_LEAF: '新增子层级前必须迁移原有节点',
   LAYER_MIGRATION_TARGET_INVALID: '请选择子树外的合法叶子层级作为迁移目标', NODE_LAYER_NOT_LEAF: '节点只能属于叶子层级',
-  NODE_STYLE_NOT_FOUND: '节点样式不存在', NODE_DELETE_BREAKS_PATHWAY: '删除后会使通路少于两个节点，请先处理受影响通路',
+  NODE_STYLE_NOT_FOUND: '节点样式不存在', NODE_DELETE_BREAKS_PATHWAY: '删除后会使通路只剩一个占用层，请先处理受影响通路',
   STYLE_DEFAULT_DELETE_FORBIDDEN: '默认或系统样式不能删除', STYLE_IN_USE_REPLACEMENT_REQUIRED: '该样式正在使用，请选择替代样式',
-  PATHWAY_MIN_STEPS: '通路至少需要两个节点', PATHWAY_DUPLICATE_NODE: '同一通路不能重复包含节点',
-  PATHWAY_LAYER_ORDER_INVALID: '通路节点必须遵循画布中的层级与同层节点顺序，不能回流',
+  PATHWAY_MIN_LAYERS: '通路至少需要占用两个不同层级', PATHWAY_DUPLICATE_NODE: '同一通路不能重复包含节点',
   PERSISTENCE_CONFLICT: '共享版本已更新，本地草稿已保留；请刷新查看最新版本并人工合并', PERSISTENCE_FAILED: '保存失败，内存中的修改仍保留', FIELD_INVALID: '字段内容不符合要求',
 };
 
@@ -57,15 +56,11 @@ export function validateDiagram(diagram: Diagram): DomainIssue[] {
   });
   if (diagram.nodeStyles.filter((x) => x.isDefault).length !== 1 || !diagram.nodeStyles.some((x) => x.isDefault && x.isSystem)) issues.push(issue('STYLE_DEFAULT_DELETE_FORBIDDEN', 'nodeStyles'));
   diagram.pathways.forEach((pathway) => {
-    if (pathway.steps.length < 2) issues.push(issue('PATHWAY_MIN_STEPS', `pathways.${pathway.id}.steps`));
-    const ids = pathway.steps.map((x) => x.nodeId); if (new Set(ids).size !== ids.length) issues.push(issue('PATHWAY_DUPLICATE_NODE', `pathways.${pathway.id}.steps`));
-    pathway.steps.forEach((step) => { if (!nodeIds.has(step.nodeId)) issues.push(issue('REFERENCE_NOT_FOUND', `pathways.${pathway.id}.steps.${step.id}`)); });
-    const orderedSteps = sortStable(pathway.steps);
-    const existingIds = orderedSteps.map((step) => step.nodeId).filter((id) => nodeIds.has(id));
-    const expectedIds = sortPathwayNodeIds(diagram, existingIds);
-    const invalidIndex = existingIds.findIndex((id, index) => id !== expectedIds[index]);
-    if (invalidIndex >= 0)
-      issues.push(issue('PATHWAY_LAYER_ORDER_INVALID', `pathways.${pathway.id}.steps.${orderedSteps[invalidIndex]?.id}`));
+    if (new Set(pathway.nodeIds).size !== pathway.nodeIds.length) issues.push(issue('PATHWAY_DUPLICATE_NODE', `pathways.${pathway.id}.nodeIds`));
+    pathway.nodeIds.forEach((nodeId, index) => { if (!nodeIds.has(nodeId)) issues.push(issue('REFERENCE_NOT_FOUND', `pathways.${pathway.id}.nodeIds.${index}`)); });
+    const existingIds = pathway.nodeIds.filter((nodeId) => nodeIds.has(nodeId));
+    if (pathwayLayerGroups(diagram, existingIds).length < 2)
+      issues.push(issue('PATHWAY_MIN_LAYERS', `pathways.${pathway.id}.nodeIds`));
   });
   return issues;
 }
@@ -84,13 +79,7 @@ export function normalizeDiagram(diagram: Diagram): Diagram {
   const layerIds = new Set(diagram.nodes.map((x) => x.layerId)); layerIds.forEach((id) => normalizeOrders(diagram.nodes.filter((x) => x.layerId === id)));
   normalizeOrders(diagram.pathways);
   diagram.pathways.forEach((pathway) => {
-    const ranks = new Map(sortPathwayNodeIds(diagram, pathway.steps.map((step) => step.nodeId)).map((id, index) => [id, index]));
-    pathway.steps.sort((left, right) =>
-      (ranks.get(left.nodeId) ?? Number.MAX_SAFE_INTEGER) -
-        (ranks.get(right.nodeId) ?? Number.MAX_SAFE_INTEGER) ||
-      left.id.localeCompare(right.id),
-    );
-    pathway.steps.forEach((step, index) => { step.order = (index + 1) * 10; });
+    pathway.nodeIds = sortPathwayNodeIds(diagram, pathway.nodeIds);
   });
   return diagram;
 }

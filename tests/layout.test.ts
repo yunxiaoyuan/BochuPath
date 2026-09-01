@@ -7,7 +7,27 @@ import { fitViewportToBounds } from '../src/layout/fit-viewport';
 describe('derived canvas', () => {
   it('derives stable directed edge ids and parallel offsets', () => {
     const diagram = createDemoDiagram(); diagram.pathways.push({ ...structuredClone(diagram.pathways[0]!), id: 'path_secondary', name: '次通路', order: 20, color: '#cc0000' });
-    const edges = deriveEdges(diagram); expect(edges).toHaveLength(4); expect(edges[0]!.id).toBe('path_main::node_demand::node_solution::0'); expect(new Set(edges.filter((x) => x.sourceNodeId === 'node_demand').map((x) => x.parallelOffset)).size).toBeGreaterThan(1);
+    const edges = deriveEdges(diagram); expect(edges).toHaveLength(4); expect(edges[0]!.id).toBe('path_main::node_demand::node_solution'); expect(new Set(edges.filter((x) => x.sourceNodeId === 'node_demand').map((x) => x.parallelOffset)).size).toBeGreaterThan(1);
+  });
+  it('fully connects consecutive occupied layers and never connects same-layer nodes', () => {
+    const diagram = createDemoDiagram();
+    diagram.nodes.push(
+      { id: 'node_demand_alt', layerId: 'layer_demand', styleId: 'style_confirmed', name: '补充需求', decompositionItems: [], order: 20 },
+      { id: 'node_delivery_alt', layerId: 'layer_delivery', styleId: 'style_confirmed', name: '补充交付', decompositionItems: [], order: 20 },
+    );
+    diagram.pathways[0]!.nodeIds = ['node_demand', 'node_demand_alt', 'node_delivery', 'node_delivery_alt'];
+    const edges = deriveEdges(diagram);
+    expect(edges.map((edge) => [edge.sourceNodeId, edge.targetNodeId])).toEqual([
+      ['node_demand', 'node_delivery'],
+      ['node_demand', 'node_delivery_alt'],
+      ['node_demand_alt', 'node_delivery'],
+      ['node_demand_alt', 'node_delivery_alt'],
+    ]);
+    expect(edges.every((edge) => edge.sourceNodeId !== 'node_demand_alt' || edge.targetNodeId !== 'node_demand')).toBe(true);
+    const lrEdges = deriveEdges({ ...diagram, layout: { ...diagram.layout, direction: 'LR' } });
+    expect(lrEdges.map(({ sourceNodeId, targetNodeId }) => [sourceNodeId, targetNodeId])).toEqual(
+      edges.map(({ sourceNodeId, targetNodeId }) => [sourceNodeId, targetNodeId]),
+    );
   });
   it('is deterministic and supports TB/LR', () => {
     const diagram = createDemoDiagram(); expect(layoutDiagram(diagram)).toEqual(layoutDiagram(structuredClone(diagram)));

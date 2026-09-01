@@ -1,5 +1,10 @@
 import type { Diagram, DiagramNode, Layer } from "./types";
 
+export interface PathwayLayerGroup {
+  layer: Layer;
+  nodes: DiagramNode[];
+}
+
 function stableLayers(layers: Layer[]): Layer[] {
   return [...layers].sort(
     (left, right) => left.order - right.order || left.id.localeCompare(right.id),
@@ -47,8 +52,43 @@ export function orderedDiagramNodes(diagram: Diagram): DiagramNode[] {
 }
 
 export function sortPathwayNodeIds(diagram: Diagram, nodeIds: string[]): string[] {
+  const ranks = new Map(
+    orderedDiagramNodes(diagram).map((node, index) => [node.id, index]),
+  );
+  return [...nodeIds].sort(
+    (left, right) =>
+      (ranks.get(left) ?? Number.MAX_SAFE_INTEGER) -
+        (ranks.get(right) ?? Number.MAX_SAFE_INTEGER) ||
+      left.localeCompare(right),
+  );
+}
+
+/**
+ * Groups pathway members by their occupied leaf layers. Empty diagram layers
+ * are intentionally skipped: edges connect consecutive occupied layers.
+ */
+export function pathwayLayerGroups(
+  diagram: Diagram,
+  nodeIds: string[],
+): PathwayLayerGroup[] {
   const selected = new Set(nodeIds);
-  return orderedDiagramNodes(diagram)
-    .filter((node) => selected.has(node.id))
-    .map((node) => node.id);
+  const nodesByLayer = new Map<string, DiagramNode[]>();
+  orderedDiagramNodes(diagram).forEach((node) => {
+    if (!selected.has(node.id)) return;
+    nodesByLayer.set(node.layerId, [
+      ...(nodesByLayer.get(node.layerId) ?? []),
+      node,
+    ]);
+  });
+  return orderedLeafLayers(diagram)
+    .map((layer) => ({ layer, nodes: nodesByLayer.get(layer.id) ?? [] }))
+    .filter((group) => group.nodes.length > 0);
+}
+
+export function pathwayEdgeCount(diagram: Diagram, nodeIds: string[]): number {
+  const groups = pathwayLayerGroups(diagram, nodeIds);
+  return groups.slice(0, -1).reduce(
+    (count, group, index) => count + group.nodes.length * groups[index + 1]!.nodes.length,
+    0,
+  );
 }

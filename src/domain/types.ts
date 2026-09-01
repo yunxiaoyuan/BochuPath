@@ -3,10 +3,9 @@ export type LayerId = string;
 export type NodeId = string;
 export type NodeStyleId = string;
 export type PathwayId = string;
-export type PathStepId = string;
 
 export interface Diagram {
-  schemaVersion: "1.0";
+  schemaVersion: "1.1";
   id: DiagramId;
   name: string;
   description?: string;
@@ -61,13 +60,7 @@ export interface Pathway {
   lineStyle: "solid" | "dashed";
   visible: boolean;
   order: number;
-  steps: PathStep[];
-}
-
-export interface PathStep {
-  id: PathStepId;
-  nodeId: NodeId;
-  order: number;
+  nodeIds: NodeId[];
 }
 
 export interface LayoutConfig {
@@ -105,7 +98,6 @@ export interface DiagramSummary {
 }
 
 export interface PathwayDraft {
-  pathwayId: PathwayId | null;
   name: string;
   nodeIds: NodeId[];
   color: string;

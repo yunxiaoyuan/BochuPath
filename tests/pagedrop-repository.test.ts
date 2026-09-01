@@ -19,7 +19,7 @@ class MemoryStorage implements Storage {
 }
 
 class FakeSharedJsonClient implements SharedJsonClient {
-  constructor(public state: BochuPathSharedState) {}
+  constructor(public state: unknown) {}
   async load(): Promise<unknown> { return structuredClone(this.state); }
   async save(state: BochuPathSharedState): Promise<void> {
     this.state = structuredClone(state);
@@ -28,7 +28,7 @@ class FakeSharedJsonClient implements SharedJsonClient {
 
 function initialState(): BochuPathSharedState {
   return {
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     revision: 1,
     updatedAt: "2026-08-30T00:00:00.000Z",
     lastMutationId: "seed_v1",
@@ -37,6 +37,31 @@ function initialState(): BochuPathSharedState {
 }
 
 describe("PageDrop shared repository", () => {
+  it("loads V1.0 shared JSON and writes V1.1 after the next save", async () => {
+    const current = createDemoDiagram();
+    const legacyDiagram = {
+      ...current,
+      schemaVersion: "1.0",
+      pathways: current.pathways.map(({ nodeIds, ...pathway }) => ({
+        ...pathway,
+        steps: nodeIds.map((nodeId, index) => ({ id: `step_${index}`, nodeId, order: (index + 1) * 10 })),
+      })),
+    };
+    const client = new FakeSharedJsonClient({
+      schemaVersion: "1.0",
+      revision: 1,
+      updatedAt: "2026-08-30T00:00:00.000Z",
+      lastMutationId: "legacy",
+      diagrams: [legacyDiagram],
+    });
+    const repository = new PageDropDiagramRepository(client, new MemoryStorage());
+    const loaded = await repository.get("diagram_demo");
+    expect(loaded.schemaVersion).toBe("1.1");
+    expect(loaded.pathways[0]?.nodeIds).toEqual(current.pathways[0]?.nodeIds);
+    await repository.save(renameDiagram(loaded, { name: "已迁移" }), loaded.revision);
+    expect((client.state as BochuPathSharedState).schemaVersion).toBe("1.1");
+  });
+
   it("shares saved diagrams and detects a stale collaborator", async () => {
     const client = new FakeSharedJsonClient(initialState());
     const alice = new PageDropDiagramRepository(client, new MemoryStorage());

@@ -26,7 +26,7 @@ declare global {
 }
 
 export interface BochuPathSharedState {
-  schemaVersion: "1.0";
+  schemaVersion: "1.1";
   revision: number;
   updatedAt: string;
   lastMutationId: string;
@@ -39,7 +39,7 @@ export interface SharedJsonClient {
 }
 
 const sharedStateSchema = z.object({
-  schemaVersion: z.literal("1.0"),
+  schemaVersion: z.union([z.literal("1.0"), z.literal("1.1")]),
   revision: z.number().int().nonnegative(),
   updatedAt: z.string().datetime(),
   lastMutationId: z.string(),
@@ -68,6 +68,7 @@ function parseSharedState(input: unknown): BochuPathSharedState {
   const state = sharedStateSchema.parse(input);
   return {
     ...state,
+    schemaVersion: "1.1",
     diagrams: state.diagrams.map((diagram) =>
       assertValid(parseDiagram(diagram)),
     ),
@@ -129,7 +130,7 @@ export class PageDropDiagramRepository implements DiagramRepository {
   ): Promise<void> {
     const mutationId = newId("mutation");
     const next: BochuPathSharedState = {
-      schemaVersion: "1.0",
+      schemaVersion: "1.1",
       revision: current.revision + 1,
       updatedAt: new Date().toISOString(),
       lastMutationId: mutationId,

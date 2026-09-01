@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDemoDiagram } from "../src/domain/seed";
 import { AppDialogProvider } from "../src/app/AppDialog";
 import { createHistory } from "../src/editor/history";
+import { addPathwayNode } from "../src/editor/commands";
 import { useEditorStore } from "../src/editor/store";
 import { Inspector } from "../src/features/workspace/components/Inspector";
 import { ObjectPanel } from "../src/features/workspace/components/ObjectPanel";
@@ -160,6 +161,13 @@ describe("workspace command transactions and unified selection", () => {
       id: "node_demand",
     });
     expect(useEditorStore.getState().focusedPathwayId).toBeNull();
+
+    act(() => {
+      useEditorStore.getState().focusPathway("path_main");
+      useEditorStore.getState().setMode("view");
+    });
+    expect(useEditorStore.getState().selection).toBeNull();
+    expect(useEditorStore.getState().focusedPathwayId).toBeNull();
   });
 
   it("previews and commits a node batch as one undoable command", async () => {
@@ -219,7 +227,7 @@ describe("workspace command transactions and unified selection", () => {
     expect(useEditorStore.getState().history.past).toHaveLength(1);
   });
 
-  it("keeps canvas pathway membership changes in one cancellable draft", async () => {
+  it("edits a selected pathway directly and keeps metadata updates separate", async () => {
     const user = userEvent.setup();
     const diagram = structuredClone(useEditorStore.getState().diagram!);
     diagram.layers.push({ id: "layer_operation", parentId: null, name: "运营层", order: 40 });
@@ -247,34 +255,25 @@ describe("workspace command transactions and unified selection", () => {
       /></AppDialogProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "在画布编辑节点" }));
-    expect(screen.getByRole("heading", { name: "编辑通路" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "在画布编辑节点" })).not.toBeInTheDocument();
+    expect(screen.getByText("3 个节点 · 3 个占用层 · 2 条边")).toBeInTheDocument();
     act(() => {
-      const draft = useEditorStore.getState().pathwayDraft!;
-      useEditorStore.getState().setPathwayDraft({
-        ...draft,
-        nodeIds: [...draft.nodeIds, "node_operation"],
-      });
+      useEditorStore.getState().execute("向通路加入节点", (current) =>
+        addPathwayNode(current, "path_main", "node_operation"),
+      );
     });
-    expect(useEditorStore.getState().pathwayDraft?.nodeIds).toEqual([
-      "node_demand", "node_solution", "node_delivery", "node_operation",
-    ]);
-    await user.click(screen.getByRole("button", { name: "取消" }));
-    expect(useEditorStore.getState().diagram?.pathways[0]?.steps).toHaveLength(3);
-    expect(useEditorStore.getState().history.past).toHaveLength(0);
-
-    await user.click(screen.getByRole("button", { name: "在画布编辑节点" }));
-    act(() => {
-      const draft = useEditorStore.getState().pathwayDraft!;
-      useEditorStore.getState().setPathwayDraft({
-        ...draft,
-        nodeIds: [...draft.nodeIds, "node_operation"],
-      });
-    });
-    await user.click(screen.getByRole("button", { name: "确定" }));
-    expect(useEditorStore.getState().diagram?.pathways[0]?.steps.map((step) => step.nodeId)).toEqual([
+    await waitFor(() => expect(screen.getByText("4 个节点 · 4 个占用层 · 3 条边")).toBeInTheDocument());
+    expect(useEditorStore.getState().diagram?.pathways[0]?.nodeIds).toEqual([
       "node_demand", "node_solution", "node_delivery", "node_operation",
     ]);
     expect(useEditorStore.getState().history.past).toHaveLength(1);
+    await user.clear(screen.getByLabelText("通路名称"));
+    await user.type(screen.getByLabelText("通路名称"), "图通路");
+    await user.click(screen.getByRole("button", { name: "确定" }));
+    expect(useEditorStore.getState().diagram?.pathways[0]?.name).toBe("图通路");
+    expect(useEditorStore.getState().diagram?.pathways[0]?.nodeIds).toEqual([
+      "node_demand", "node_solution", "node_delivery", "node_operation",
+    ]);
+    expect(useEditorStore.getState().history.past).toHaveLength(2);
   });
 });

@@ -3,7 +3,6 @@ import {
   Background,
   BaseEdge,
   Controls,
-  EdgeLabelRenderer,
   Handle,
   MarkerType,
   MiniMap,
@@ -25,22 +24,28 @@ import type {
   DiagramNode,
   EditorMode,
   NodeStyle,
+  Pathway,
 } from "../../../domain/types";
 import { descendantIds, sortStable } from "../../../domain/rules";
-import { orderedDiagramNodes, sortPathwayNodeIds } from "../../../domain/layer-order";
+import {
+  orderedDiagramNodes,
+  pathwayLayerGroups,
+  sortPathwayNodeIds,
+} from "../../../domain/layer-order";
 import {
   fullLayerPath,
   nodePathwayContext,
   nodePathways,
 } from "../../../domain/selectors";
 import {
+  addPathwayNode,
   createPathway,
+  removePathwayNode,
   reorderLayer,
   reorderNode,
-  updatePathway,
 } from "../../../editor/commands";
 import { useEditorStore } from "../../../editor/store";
-import { deriveEdges } from "../../../layout/derive-edges";
+import { deriveEdges, derivePathwayEdges } from "../../../layout/derive-edges";
 import { fitViewportToBounds } from "../../../layout/fit-viewport";
 import {
   layoutDiagram,
@@ -60,8 +65,8 @@ interface BusinessData extends Record<string, unknown> {
   dimmed: boolean;
   related: boolean;
   candidate: boolean;
-  step?: number;
-  draftStep: boolean;
+  pathwayMember: boolean;
+  draftMember: boolean;
   fontSize: number;
   descriptionFontSize: number;
   canReorder: boolean;
@@ -82,7 +87,6 @@ interface ParallelData extends Record<string, unknown> {
   offset: number;
   direction: "TB" | "LR";
   dimmed: boolean;
-  sequence: number;
   pathwayId?: string;
   draft?: boolean;
 }
@@ -117,7 +121,6 @@ function CanvasInner({ mode, onCreateNode }: Props) {
   const focusPathway = useEditorStore((s) => s.focusPathway);
   const draft = useEditorStore((s) => s.pathwayDraft);
   const setDraft = useEditorStore((s) => s.setPathwayDraft);
-  const startPathwayDraft = useEditorStore((s) => s.startPathwayDraft);
   const execute = useEditorStore((s) => s.execute);
   const { setViewport, zoomIn, zoomOut } = useReactFlow<
     CanvasNode,
@@ -137,7 +140,7 @@ function CanvasInner({ mode, onCreateNode }: Props) {
     [diagram.pathways, focused],
   );
   const focusedIds = useMemo(
-    () => new Set(focusedPath?.steps.map((step) => step.nodeId)),
+    () => new Set(focusedPath?.nodeIds),
     [focusedPath],
   );
   const selectedNodeContext = useMemo(
@@ -161,6 +164,10 @@ function CanvasInner({ mode, onCreateNode }: Props) {
     ),
     [diagram, draft],
   );
+  const draftLayerCount = useMemo(
+    () => pathwayLayerGroups(diagram, draft?.nodeIds ?? []).length,
+    [diagram, draft?.nodeIds],
+  );
 
   const applyDraftCandidate = useCallback(
     (nodeId: string) => {
@@ -174,16 +181,10 @@ function CanvasInner({ mode, onCreateNode }: Props) {
   );
 
   const finishDraft = useCallback(() => {
-    if (!draft || draft.nodeIds.length < 2) return;
+    if (!draft || pathwayLayerGroups(diagram, draft.nodeIds).length < 2) return;
     const before = new Set(diagram.pathways.map((pathway) => pathway.id));
-    if (execute(draft.pathwayId ? "更新通路" : "新建通路", (current) =>
-      draft.pathwayId
-        ? updatePathway(current, draft.pathwayId, draft)
-        : createPathway(current, draft),
-    )) {
-      const created = draft.pathwayId
-        ? useEditorStore.getState().diagram?.pathways.find((pathway) => pathway.id === draft.pathwayId)
-        : useEditorStore.getState().diagram?.pathways.find((pathway) => !before.has(pathway.id));
+    if (execute("新建通路", (current) => createPathway(current, draft))) {
+      const created = useEditorStore.getState().diagram?.pathways.find((pathway) => !before.has(pathway.id));
       setTool("select");
       if (created) select({ kind: "pathway", id: created.id });
     }
@@ -241,14 +242,13 @@ function CanvasInner({ mode, onCreateNode }: Props) {
       const style =
         diagram.nodeStyles.find((item) => item.id === node.styleId) ??
         diagram.nodeStyles[0]!;
-      const focusedStep = focusedPath
-        ? [...focusedPath.steps]
-            .sort((left, right) => left.order - right.order)
-            .findIndex((item) => item.nodeId === node.id) + 1
-        : undefined;
-      const draftStep = (draft?.nodeIds.indexOf(node.id) ?? -1) + 1;
-      const step = draftStep > 0 ? draftStep : focusedStep;
-      const candidate = draftCandidateIds.has(node.id);
+      const pathwayMember = focusedIds.has(node.id);
+      const draftMember = draft?.nodeIds.includes(node.id) ?? false;
+      const editingFocusedPathway =
+        mode === "edit" && tool === "select" && selection?.kind === "pathway";
+      const candidate =
+        draftCandidateIds.has(node.id) ||
+        (editingFocusedPathway && !pathwayMember);
       const related = Boolean(
         selectedNodeContext?.relatedNodeIds.has(node.id) &&
         selection?.kind === "node" &&
@@ -256,7 +256,9 @@ function CanvasInner({ mode, onCreateNode }: Props) {
       );
       const dimmed = draft
         ? false
-        : focusedIds.size
+        : editingFocusedPathway
+          ? false
+          : focusedIds.size
           ? !focusedIds.has(node.id)
           : selectedNodeContext
             ? !selectedNodeContext.relatedNodeIds.has(node.id)
@@ -272,12 +274,12 @@ function CanvasInner({ mode, onCreateNode }: Props) {
         zIndex: 4,
         draggable: canReorder,
         extent: canReorder ? nodeDragExtent(siblingRects) : undefined,
-        selectable: tool !== "connectPathway" || candidate || draftStep > 0,
+        selectable: tool !== "connectPathway" || candidate || draftMember,
         focusable: true,
         selected:
-          multiSelectedNodeIds.includes(node.id) || Boolean(draftStep > 0),
+          multiSelectedNodeIds.includes(node.id) || draftMember,
         ariaRole: "button",
-        ariaLabel: `${node.name}，位于 ${fullLayerPath(diagram, node.layerId)}，参与 ${participationCount} 条通路${draftStep > 0 ? "，Shift+空格从当前通路移除" : draft?.pathwayId ? "，Shift+空格加入当前通路" : draft ? "，空格加入当前通路" : ""}`,
+        ariaLabel: `${node.name}，位于 ${fullLayerPath(diagram, node.layerId)}，参与 ${participationCount} 条通路${draftMember ? "，Shift+空格从新通路移除" : draft ? "，空格加入新通路" : selection?.kind === "pathway" && mode === "edit" ? pathwayMember ? "，Shift+空格从当前通路移除" : "，Shift+空格加入当前通路" : ""}`,
         data: {
           kind: "business",
           node,
@@ -285,8 +287,8 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           dimmed,
           related,
           candidate,
-          step: step && step > 0 ? step : undefined,
-          draftStep: draftStep > 0,
+          pathwayMember,
+          draftMember,
           fontSize: diagram.layout.fontSize,
           descriptionFontSize: diagram.layout.descriptionFontSize,
           canReorder,
@@ -318,7 +320,6 @@ function CanvasInner({ mode, onCreateNode }: Props) {
 
   const edges = useMemo<CanvasEdge[]>(() => {
     const confirmed: CanvasEdge[] = deriveEdges(diagram)
-      .filter((edge) => !draft?.pathwayId || edge.pathwayId !== draft.pathwayId)
       .map((edge) => {
       const pathway = diagram.pathways.find(
         (item) => item.id === edge.pathwayId,
@@ -361,55 +362,63 @@ function CanvasInner({ mode, onCreateNode }: Props) {
         selectable: true,
         focusable: true,
         ariaRole: "button",
-        ariaLabel: `${pathway?.name ?? "通路"}第 ${edge.sequence} 段：${source?.name ?? "未知节点"} 到 ${target?.name ?? "未知节点"}`,
-        label: isFocused ? String(edge.sequence) : undefined,
+        ariaLabel: `${pathway?.name ?? "通路"}：${source?.name ?? "未知节点"} 到 ${target?.name ?? "未知节点"}`,
         data: {
           offset: edge.parallelOffset,
           direction: diagram.layout.direction,
           dimmed,
-          sequence: edge.sequence,
           pathwayId: edge.pathwayId,
         },
       };
     });
-    const candidates: CanvasEdge[] =
-      draft?.nodeIds.slice(0, -1).map((nodeId, index) => {
-        const targetId = draft.nodeIds[index + 1]!;
-        const source = diagram.nodes.find((item) => item.id === nodeId);
-        const target = diagram.nodes.find((item) => item.id === targetId);
+    const draftPathway: Pathway | null = draft
+      ? {
+          id: "draft",
+          name: draft.name,
+          nodeIds: draft.nodeIds,
+          color: draft.color,
+          lineStyle: draft.lineStyle,
+          description: draft.description,
+          visible: draft.visible,
+          order: 0,
+        }
+      : null;
+    const candidates: CanvasEdge[] = draftPathway
+      ? derivePathwayEdges(diagram, draftPathway).map((edge) => {
+        const source = diagram.nodes.find((item) => item.id === edge.sourceNodeId);
+        const target = diagram.nodes.find((item) => item.id === edge.targetNodeId);
         return {
-          id: `draft::${index}`,
+          id: edge.id,
           type: "parallel",
-          source: nodeId,
-          target: targetId,
+          source: edge.sourceNodeId,
+          target: edge.targetNodeId,
           ...edgeHandleIds(source, target, layout.nodes, diagram.layout.direction),
           animated: true,
           markerEnd: {
             type: MarkerType.ArrowClosed,
-            color: draft.color,
+            color: draftPathway.color,
             width: 18,
             height: 18,
           },
           style: {
-            stroke: draft.color,
+            stroke: draftPathway.color,
             strokeWidth: 2,
             strokeDasharray: "6 5",
           },
           zIndex: 3,
           selectable: true,
           focusable: true,
-          ariaLabel: `候选通路第 ${index + 1} 段：${source?.name ?? "未知节点"} 到 ${target?.name ?? "未知节点"}`,
-          label: String(index + 1),
+          ariaLabel: `新通路：${source?.name ?? "未知节点"} 到 ${target?.name ?? "未知节点"}`,
           className: "draft-edge",
           data: {
             offset: 0,
             direction: diagram.layout.direction,
             dimmed: false,
-            sequence: index + 1,
             draft: true,
           },
         };
-      }) ?? [];
+      })
+      : [];
     return [...confirmed, ...candidates];
   }, [diagram, draft, focused, layout.nodes, relatedPathwayIds, selectedNodeContext, selection]);
 
@@ -467,16 +476,27 @@ function CanvasInner({ mode, onCreateNode }: Props) {
 
   const handleNodeClick = (event: React.MouseEvent, node: CanvasNode) => {
     if (node.data.kind === "business" && tool === "connectPathway" && draft) {
-      const stepIndex = draft.nodeIds.indexOf(node.id);
-      if (draft.pathwayId) {
-        if (event.shiftKey) {
-          if (stepIndex >= 0) removeDraftNode(node.id);
-          else applyDraftCandidate(node.id);
-        } else selectCanvasNode(node);
-        return;
-      }
-      if (event.shiftKey && stepIndex >= 0) removeDraftNode(node.id);
+      const member = draft.nodeIds.includes(node.id);
+      if (event.shiftKey && member) removeDraftNode(node.id);
       else if (!event.shiftKey && draftCandidateIds.has(node.id)) applyDraftCandidate(node.id);
+      return;
+    }
+    if (
+      node.data.kind === "business" &&
+      mode === "edit" &&
+      tool === "select" &&
+      selection?.kind === "pathway" &&
+      event.shiftKey
+    ) {
+      const pathway = diagram.pathways.find((item) => item.id === selection.id);
+      if (!pathway) return;
+      const included = pathway.nodeIds.includes(node.id);
+      execute(
+        included ? "从通路移除节点" : "向通路加入节点",
+        (current) => included
+          ? removePathwayNode(current, pathway.id, node.id)
+          : addPathwayNode(current, pathway.id, node.id),
+      );
       return;
     }
     if (tool !== "connectPathway")
@@ -661,14 +681,28 @@ function CanvasInner({ mode, onCreateNode }: Props) {
     const node = flowNodes.find((item) => item.id === id);
     if (node) {
       if (node.data.kind === "business" && tool === "connectPathway" && draft) {
-        const stepIndex = draft.nodeIds.indexOf(node.id);
-        if (draft.pathwayId) {
-          if (event.shiftKey) {
-            if (stepIndex >= 0) removeDraftNode(node.id);
-            else applyDraftCandidate(node.id);
-          } else selectCanvasNode(node);
-        } else if (event.shiftKey && stepIndex >= 0) removeDraftNode(node.id);
+        const member = draft.nodeIds.includes(node.id);
+        if (event.shiftKey && member) removeDraftNode(node.id);
         else if (!event.shiftKey && draftCandidateIds.has(node.id)) applyDraftCandidate(node.id);
+        return;
+      }
+      if (
+        node.data.kind === "business" &&
+        event.key === " " &&
+        event.shiftKey &&
+        mode === "edit" &&
+        tool === "select" &&
+        selection?.kind === "pathway"
+      ) {
+        const pathway = diagram.pathways.find((item) => item.id === selection.id);
+        if (!pathway) return;
+        const included = pathway.nodeIds.includes(node.id);
+        execute(
+          included ? "从通路移除节点" : "向通路加入节点",
+          (current) => included
+            ? removePathwayNode(current, pathway.id, node.id)
+            : addPathwayNode(current, pathway.id, node.id),
+        );
         return;
       }
       if (tool !== "connectPathway")
@@ -720,9 +754,9 @@ function CanvasInner({ mode, onCreateNode }: Props) {
               onClick={() =>
                 setTool(tool === "connectPathway" ? "select" : "connectPathway")
               }
-              title="连接通路 C"
+              title="新建通路 C"
             >
-              ⌁ 连接
+              ⌁ 新建通路
             </button>
             <span className="drag-order-hint">拖动或 Alt+方向键调整顺序</span>
           </div>
@@ -748,14 +782,12 @@ function CanvasInner({ mode, onCreateNode }: Props) {
       {tool === "connectPathway" && (
         <div className="connect-guide" role="status">
           <span>
-            {draft?.pathwayId
-              ? "编辑：普通点击选择节点，Shift+点击加入或移除；顺序由画布自动确定。"
-              : "新建：点击未选节点加入，Shift+点击已选节点移除；顺序由画布自动确定。"}
+            新建：点击未选节点加入，Shift+点击已选节点移除；相邻占用层自动全连接。
           </span>
-          <strong>已选 {draft?.nodeIds.length ?? 0} 个</strong>
+          <strong>已选 {draft?.nodeIds.length ?? 0} 个节点 · {draftLayerCount} 层</strong>
           <button
             className="primary-button"
-            disabled={!draft || draft.nodeIds.length < 2}
+            disabled={!draft || draftLayerCount < 2}
             onClick={finishDraft}
           >
             完成
@@ -785,22 +817,6 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           onNodeDragStop={handleNodeDragStop}
           onEdgeClick={(_event, edge) => {
             if (edge.data?.pathwayId) focusPathway(edge.data.pathwayId);
-          }}
-          onEdgeDoubleClick={(_event, edge) => {
-            if (mode !== "edit" || !edge.data?.pathwayId) return;
-            const pathway = diagram.pathways.find((item) => item.id === edge.data?.pathwayId);
-            if (!pathway) return;
-            startPathwayDraft({
-              pathwayId: pathway.id,
-              name: pathway.name,
-              nodeIds: [...pathway.steps]
-                .sort((left, right) => left.order - right.order)
-                .map((step) => step.nodeId),
-              color: pathway.color,
-              lineStyle: pathway.lineStyle,
-              description: pathway.description ?? "",
-              visible: pathway.visible,
-            });
           }}
           onPaneClick={() => {
             if (tool !== "connectPathway") select(null);
@@ -835,7 +851,7 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           <div className="canvas-empty">
             <span>⌘</span>
             <h2>从层级开始搭建通路图</h2>
-            <p>创建层级后即可放入节点，再用有序通路连接它们。</p>
+            <p>创建层级后即可放入节点，再用分层通路关联它们。</p>
             {mode === "edit" && (
               <button className="primary-button" onClick={onCreateNode}>
                 开始创建
@@ -863,13 +879,8 @@ function CanvasTextAlternative({ diagram }: { diagram: Diagram }) {
         {diagram.pathways.map((pathway) => (
           <li key={pathway.id}>
             {pathway.name}：
-            {[...pathway.steps]
-              .sort((left, right) => left.order - right.order)
-              .map(
-                (step) =>
-                  diagram.nodes.find((node) => node.id === step.nodeId)?.name ??
-                  "未知节点",
-              )
+            {pathwayLayerGroups(diagram, pathway.nodeIds)
+              .map((group) => `${group.layer.name}（${group.nodes.map((node) => node.name).join("、")}）`)
               .join(" → ")}
           </li>
         ))}
@@ -880,7 +891,7 @@ function CanvasTextAlternative({ diagram }: { diagram: Diagram }) {
 
 const BusinessNode = memo(({ data, selected }: NodeProps<BusinessFlowNode>) => (
   <div
-    className={`business-node ${data.canReorder ? "reorderable" : ""} ${selected ? "selected" : ""} ${data.related ? "related" : ""} ${data.candidate ? "candidate" : ""} ${data.dimmed ? "dimmed" : ""}`}
+    className={`business-node ${data.canReorder ? "reorderable" : ""} ${selected ? "selected" : ""} ${data.pathwayMember ? "pathway-member" : ""} ${data.related ? "related" : ""} ${data.candidate ? "candidate" : ""} ${data.dimmed ? "dimmed" : ""}`}
     title={data.canReorder ? `${data.reorderAxis}拖动可调整同层节点顺序` : undefined}
     style={{
       background: data.style.fillColor,
@@ -893,9 +904,9 @@ const BusinessNode = memo(({ data, selected }: NodeProps<BusinessFlowNode>) => (
   >
     <Handle id="top" type="target" position={Position.Top} />
     <Handle id="left" type="target" position={Position.Left} />
-    {data.step && (
-      <b className={`step-badge ${data.draftStep ? "draft" : ""}`}>
-        {data.step}
+    {(data.pathwayMember || data.draftMember) && (
+      <b className={`pathway-member-badge ${data.draftMember ? "draft" : ""}`} aria-hidden="true">
+        ✓
       </b>
     )}
     <strong style={{ fontSize: data.fontSize }}>{data.node.name}</strong>
@@ -926,7 +937,7 @@ LayerNode.displayName = "LayerNode";
 const ParallelEdge = memo((props: EdgeProps<CanvasEdge>) => {
   const offset = props.data?.offset ?? 0;
   const direction = props.data?.direction ?? "TB";
-  const [path, labelX, labelY] = getSmoothStepPath({
+  const [path] = getSmoothStepPath({
     sourceX: props.sourceX + (direction === "TB" ? offset : 0),
     sourceY: props.sourceY + (direction === "LR" ? offset : 0),
     sourcePosition: props.sourcePosition,
@@ -937,26 +948,12 @@ const ParallelEdge = memo((props: EdgeProps<CanvasEdge>) => {
     offset: 24,
   });
   return (
-    <>
-      <BaseEdge
-        path={path}
-        markerEnd={props.markerEnd}
-        style={props.style}
-        interactionWidth={18}
-      />
-      {props.label && (
-        <EdgeLabelRenderer>
-          <span
-            className={`edge-step-label ${props.data?.draft ? "draft" : ""}`}
-            style={{
-              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-            }}
-          >
-            {props.label}
-          </span>
-        </EdgeLabelRenderer>
-      )}
-    </>
+    <BaseEdge
+      path={path}
+      markerEnd={props.markerEnd}
+      style={props.style}
+      interactionWidth={18}
+    />
   );
 });
 ParallelEdge.displayName = "ParallelEdge";

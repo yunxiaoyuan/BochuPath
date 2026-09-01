@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAppDialog } from "../../app/AppDialog";
 import { usesSharedJsonRepository } from "../../app/runtime";
-import { createPathway, updatePathway } from "../../editor/commands";
+import { createPathway } from "../../editor/commands";
 import { useEditorStore } from "../../editor/store";
 import type { EditorMode } from "../../domain/types";
+import { pathwayLayerGroups } from "../../domain/layer-order";
 import { nodePathwayContext } from "../../domain/selectors";
 import { ObjectPanel } from "./components/ObjectPanel";
 import { PathwayCanvas } from "./components/PathwayCanvas";
@@ -65,6 +66,11 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
         current.setTool("select");
         return;
       }
+      if (event.key === "Escape" && current.selection?.kind === "pathway") {
+        event.preventDefault();
+        current.select(null);
+        return;
+      }
       if (editing) return;
       if (
         (event.ctrlKey || event.metaKey) &&
@@ -85,7 +91,8 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
         event.key === "Enter" &&
         current.tool === "connectPathway" &&
         current.pathwayDraft &&
-        current.pathwayDraft.nodeIds.length >= 2
+        current.diagram &&
+        pathwayLayerGroups(current.diagram, current.pathwayDraft.nodeIds).length >= 2
       ) {
         event.preventDefault();
         const draft = current.pathwayDraft;
@@ -93,15 +100,9 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
           current.diagram?.pathways.map((pathway) => pathway.id),
         );
         if (
-          current.execute(draft.pathwayId ? "更新通路" : "新建通路", (diagram) =>
-            draft.pathwayId
-              ? updatePathway(diagram, draft.pathwayId, draft)
-              : createPathway(diagram, draft),
-          )
+          current.execute("新建通路", (diagram) => createPathway(diagram, draft))
         ) {
-          const created = draft.pathwayId
-            ? useEditorStore.getState().diagram?.pathways.find((pathway) => pathway.id === draft.pathwayId)
-            : useEditorStore.getState().diagram?.pathways.find((pathway) => !before.has(pathway.id));
+          const created = useEditorStore.getState().diagram?.pathways.find((pathway) => !before.has(pathway.id));
           current.setTool("select");
           if (created) current.select({ kind: "pathway", id: created.id });
         }

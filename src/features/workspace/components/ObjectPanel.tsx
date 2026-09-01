@@ -6,6 +6,7 @@ import {
   styleReferenceCount,
 } from "../../../domain/selectors";
 import { sortStable } from "../../../domain/rules";
+import { pathwayEdgeCount } from "../../../domain/layer-order";
 import { setPathwayVisibility } from "../../../editor/commands";
 import { useEditorStore } from "../../../editor/store";
 import type { CreateKind } from "../WorkspacePage";
@@ -188,7 +189,7 @@ export function ObjectPanel({ mode, onCreate, onClose }: Props) {
                   >
                     <i style={{ background: pathway.color }} />
                     <span>{pathway.name}</span>
-                    <small>{pathway.steps.length}</small>
+                    <small>{pathway.nodeIds.length} 节点 · {pathwayEdgeCount(diagram, pathway.nodeIds)} 边</small>
                   </button>
                 </div>
               ))}

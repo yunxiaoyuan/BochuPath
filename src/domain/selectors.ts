@@ -10,13 +10,13 @@ export function fullLayerPath(diagram: Diagram, layerId: string): string {
   return names.join(' / ');
 }
 export function nodeLabel(diagram: Diagram, node: DiagramNode): string { return `${node.name} · ${fullLayerPath(diagram, node.layerId)}`; }
-export function nodePathways(diagram: Diagram, nodeId: string): Pathway[] { return sortStable(diagram.pathways.filter((x) => x.steps.some((step) => step.nodeId === nodeId))); }
+export function nodePathways(diagram: Diagram, nodeId: string): Pathway[] { return sortStable(diagram.pathways.filter((pathway) => pathway.nodeIds.includes(nodeId))); }
 export function styleReferenceCount(diagram: Diagram, styleId: string): number { return diagram.nodes.filter((x) => x.styleId === styleId).length; }
 export function selectedEntity(diagram: Diagram, kind: string, id: string): Diagram | Layer | DiagramNode | NodeStyle | Pathway | undefined {
   if (kind === 'diagram') return diagram; if (kind === 'layer') return diagram.layers.find((x) => x.id === id); if (kind === 'node') return diagram.nodes.find((x) => x.id === id);
   if (kind === 'nodeStyle') return diagram.nodeStyles.find((x) => x.id === id); if (kind === 'pathway') return diagram.pathways.find((x) => x.id === id); return undefined;
 }
-export function pathwaysContainingAll(diagram: Diagram, nodeIds: string[]): Pathway[] { return diagram.pathways.filter((pathway) => nodeIds.every((id) => pathway.steps.some((step) => step.nodeId === id))); }
+export function pathwaysContainingAll(diagram: Diagram, nodeIds: string[]): Pathway[] { return diagram.pathways.filter((pathway) => nodeIds.every((id) => pathway.nodeIds.includes(id))); }
 
 export interface NodePathwayContext {
   visiblePathways: Pathway[];
@@ -32,7 +32,7 @@ export function nodePathwayContext(
   const visiblePathways = pathways.filter((pathway) => pathway.visible);
   const relatedNodeIds = new Set<string>([nodeId]);
   visiblePathways.forEach((pathway) =>
-    pathway.steps.forEach((step) => relatedNodeIds.add(step.nodeId)),
+    pathway.nodeIds.forEach((nodeId) => relatedNodeIds.add(nodeId)),
   );
   return {
     visiblePathways,

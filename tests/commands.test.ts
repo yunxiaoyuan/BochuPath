@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankDiagram, createDemoDiagram } from '../src/domain/seed';
 import { parseBatchNames } from '../src/editor/batch-input';
-import { createLayer, createLayersBatch, createNode, createNodesBatch, createNodeStyle, createPathway, deleteNode, deleteNodeStyleWithReplacement, reorderLayer, reorderNode, setDefaultStyle } from '../src/editor/commands';
+import { addPathwayNode, createLayer, createLayersBatch, createNode, createNodesBatch, createNodeStyle, createPathway, deleteNode, deleteNodeStyleWithReplacement, removePathwayNode, reorderLayer, reorderNode, setDefaultStyle, updateNode, updatePathwayMetadata } from '../src/editor/commands';
 
 describe('domain commands', () => {
   it('creates a child and migrates existing nodes atomically', () => {
@@ -12,7 +12,7 @@ describe('domain commands', () => {
   });
   it('blocks node deletion that would break a pathway and reconnects a longer path', () => {
     const demo = createDemoDiagram(); expect(() => deleteNode(demo, 'node_solution')).not.toThrow();
-    expect(deleteNode(demo, 'node_solution').pathways[0]!.steps.map((x) => x.nodeId)).toEqual(['node_demand', 'node_delivery']);
+    expect(deleteNode(demo, 'node_solution').pathways[0]!.nodeIds).toEqual(['node_demand', 'node_delivery']);
     expect(() => deleteNode(deleteNode(demo, 'node_solution'), 'node_demand')).toThrow('NODE_DELETE_BREAKS_PATHWAY');
   });
   it('requires unique pathway nodes and replaces style references transactionally', () => {
@@ -21,14 +21,30 @@ describe('domain commands', () => {
     diagram.nodes[0]!.styleId = custom.id; diagram = deleteNodeStyleWithReplacement(diagram, custom.id, 'style_confirmed');
     expect(diagram.nodeStyles.some((x) => x.id === custom.id)).toBe(false); expect(diagram.nodes[0]!.styleId).toBe('style_confirmed');
   });
-  it('allows same-layer nodes and canonicalizes pathway input to canvas order', () => {
+  it('allows same-layer members, requires another occupied layer, and canonicalizes serialization', () => {
     let diagram = createDemoDiagram();
     diagram = createNode(diagram, { name: '需求补充', layerId: 'layer_demand', styleId: 'style_confirmed' });
     const sameLayerId = diagram.nodes.at(-1)!.id;
-    const withSameLayer = createPathway(diagram, { name: '同层', nodeIds: [sameLayerId, 'node_demand'], color: '#000000', lineStyle: 'solid' });
-    expect(withSameLayer.pathways.at(-1)?.steps.map((step) => step.nodeId)).toEqual(['node_demand', sameLayerId]);
+    expect(() => createPathway(diagram, { name: '仅同层', nodeIds: [sameLayerId, 'node_demand'], color: '#000000', lineStyle: 'solid' })).toThrow('PATHWAY_MIN_LAYERS');
+    const withSameLayer = createPathway(diagram, { name: '同层并行', nodeIds: [sameLayerId, 'node_delivery', 'node_demand'], color: '#000000', lineStyle: 'solid' });
+    expect(withSameLayer.pathways.at(-1)?.nodeIds).toEqual(['node_demand', sameLayerId, 'node_delivery']);
     const canonical = createPathway(diagram, { name: '自动排序', nodeIds: ['node_delivery', 'node_demand'], color: '#000000', lineStyle: 'solid' });
-    expect(canonical.pathways.at(-1)?.steps.map((step) => step.nodeId)).toEqual(['node_demand', 'node_delivery']);
+    expect(canonical.pathways.at(-1)?.nodeIds).toEqual(['node_demand', 'node_delivery']);
+  });
+  it('updates membership immediately without allowing metadata saves to overwrite it', () => {
+    let diagram = createDemoDiagram();
+    diagram = createNode(diagram, { name: '需求补充', layerId: 'layer_demand', styleId: 'style_confirmed' });
+    const addedId = diagram.nodes.at(-1)!.id;
+    diagram = addPathwayNode(diagram, 'path_main', addedId);
+    diagram = updatePathwayMetadata(diagram, 'path_main', { name: '图通路', color: '#123456', lineStyle: 'dashed' });
+    expect(diagram.pathways[0]?.nodeIds).toContain(addedId);
+    diagram = removePathwayNode(diagram, 'path_main', addedId);
+    expect(diagram.pathways[0]?.nodeIds).not.toContain(addedId);
+
+    const minimal = createPathway(diagram, { name: '最小图', nodeIds: ['node_demand', 'node_solution'], color: '#000000', lineStyle: 'solid' });
+    const minimalId = minimal.pathways.at(-1)!.id;
+    expect(() => removePathwayNode(minimal, minimalId, 'node_solution')).toThrow('PATHWAY_MIN_LAYERS');
+    expect(() => updateNode(minimal, 'node_solution', { ...minimal.nodes.find((node) => node.id === 'node_solution')!, layerId: 'layer_demand' })).toThrow('PATHWAY_MIN_LAYERS');
   });
   it('keeps exactly one system default style', () => {
     const diagram = setDefaultStyle(createDemoDiagram(), 'style_review'); expect(diagram.nodeStyles.filter((x) => x.isDefault)).toHaveLength(1); expect(diagram.nodeStyles.find((x) => x.isDefault)?.id).toBe('style_review');
@@ -64,7 +80,7 @@ describe('domain commands', () => {
   it('persists constrained layer/node ordering when later objects are added', () => {
     let diagram = createDemoDiagram();
     diagram = reorderLayer(diagram, 'layer_delivery', 0);
-    expect(diagram.pathways[0]?.steps.map((step) => step.nodeId)).toEqual([
+    expect(diagram.pathways[0]?.nodeIds).toEqual([
       'node_delivery', 'node_demand', 'node_solution',
     ]);
     diagram = createLayer(diagram, { name: '运营层', parentId: null });

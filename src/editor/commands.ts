@@ -1,4 +1,5 @@
 import { newId } from '../domain/seed';
+import { pathwayLayerGroups } from '../domain/layer-order';
 import { assertValid, descendantIds, DomainError, errorMessages, isLeafLayer, normalizeDiagram } from '../domain/rules';
 import type { Diagram, DiagramNode, Layer, LayoutConfig, NodeStyle, Pathway } from '../domain/types';
 
@@ -122,13 +123,13 @@ export function duplicateNode(diagram: Diagram, id: string): Diagram {
 
 export function deleteNode(diagram: Diagram, id: string): Diagram {
   if (!diagram.nodes.some((x) => x.id === id)) fail('REFERENCE_NOT_FOUND', `nodes.${id}`);
-  if (diagram.pathways.some((pathway) => pathway.steps.some((x) => x.nodeId === id) && pathway.steps.length - 1 < 2)) fail('NODE_DELETE_BREAKS_PATHWAY', `nodes.${id}`);
-  return commit(diagram, (next) => { next.nodes = next.nodes.filter((x) => x.id !== id); next.pathways.forEach((pathway) => { pathway.steps = pathway.steps.filter((x) => x.nodeId !== id); }); });
+  if (diagram.pathways.some((pathway) => pathway.nodeIds.includes(id) && pathwayLayerGroups(diagram, pathway.nodeIds.filter((nodeId) => nodeId !== id)).length < 2)) fail('NODE_DELETE_BREAKS_PATHWAY', `nodes.${id}`);
+  return commit(diagram, (next) => { next.nodes = next.nodes.filter((x) => x.id !== id); next.pathways.forEach((pathway) => { pathway.nodeIds = pathway.nodeIds.filter((nodeId) => nodeId !== id); }); });
 }
 
 export function replacePathwayNode(diagram: Diagram, pathwayId: string, oldNodeId: string, newNodeId: string): Diagram {
   if (!diagram.nodes.some((x) => x.id === newNodeId)) fail('REFERENCE_NOT_FOUND', 'newNodeId');
-  return commit(diagram, (next) => { const pathway = next.pathways.find((x) => x.id === pathwayId); if (!pathway) fail('REFERENCE_NOT_FOUND', `pathways.${pathwayId}`); const step = pathway.steps.find((x) => x.nodeId === oldNodeId); if (!step) fail('REFERENCE_NOT_FOUND', 'oldNodeId'); step.nodeId = newNodeId; });
+  return commit(diagram, (next) => { const pathway = next.pathways.find((x) => x.id === pathwayId); if (!pathway) fail('REFERENCE_NOT_FOUND', `pathways.${pathwayId}`); const index = pathway.nodeIds.indexOf(oldNodeId); if (index < 0) fail('REFERENCE_NOT_FOUND', 'oldNodeId'); pathway.nodeIds[index] = newNodeId; });
 }
 
 export interface StyleInput { name: string; shape: NodeStyle['shape']; fillColor: string; borderColor: string; borderStyle: NodeStyle['borderStyle']; borderWidth: NodeStyle['borderWidth']; borderRadius: number; textColor: string; icon?: string }
@@ -156,25 +157,42 @@ export function setDefaultStyle(diagram: Diagram, id: string): Diagram {
   return commit(diagram, (next) => { next.nodeStyles.forEach((x) => { x.isDefault = x.id === id; }); const chosen = next.nodeStyles.find((x) => x.id === id); if (chosen) chosen.isSystem = true; });
 }
 
-export interface PathwayInput { name: string; nodeIds: string[]; color: string; lineStyle: Pathway['lineStyle']; description?: string; visible?: boolean; order?: number }
-function validatePathwayInput(diagram: Diagram, input: PathwayInput): void {
+export interface PathwayMetadataInput { name: string; color: string; lineStyle: Pathway['lineStyle']; description?: string; visible?: boolean }
+export interface PathwayInput extends PathwayMetadataInput { nodeIds: string[]; order?: number }
+function validatePathwayMetadata(input: PathwayMetadataInput): void {
   if (!input.name.trim() || input.name.trim().length > 80) fail('FIELD_INVALID', 'name');
-  if (input.nodeIds.length < 2) fail('PATHWAY_MIN_STEPS', 'nodeIds'); if (new Set(input.nodeIds).size !== input.nodeIds.length) fail('PATHWAY_DUPLICATE_NODE', 'nodeIds');
-  if (input.nodeIds.some((id) => !diagram.nodes.some((x) => x.id === id))) fail('REFERENCE_NOT_FOUND', 'nodeIds');
+}
+function validatePathwayNodes(diagram: Diagram, nodeIds: string[]): void {
+  if (new Set(nodeIds).size !== nodeIds.length) fail('PATHWAY_DUPLICATE_NODE', 'nodeIds');
+  if (nodeIds.some((id) => !diagram.nodes.some((x) => x.id === id))) fail('REFERENCE_NOT_FOUND', 'nodeIds');
+  if (pathwayLayerGroups(diagram, nodeIds).length < 2) fail('PATHWAY_MIN_LAYERS', 'nodeIds');
+}
+function validatePathwayInput(diagram: Diagram, input: PathwayInput): void {
+  validatePathwayMetadata(input);
+  validatePathwayNodes(diagram, input.nodeIds);
 }
 export function createPathway(diagram: Diagram, input: PathwayInput): Diagram {
   validatePathwayInput(diagram, input);
-  return commit(diagram, (next) => { next.pathways.push({ id: newId('path'), name: input.name.trim(), color: input.color, lineStyle: input.lineStyle, description: input.description?.trim() || undefined, visible: input.visible ?? true, order: input.order ?? next.pathways.length * 10 + 10, steps: input.nodeIds.map((nodeId, index) => ({ id: newId('step'), nodeId, order: (index + 1) * 10 })) }); });
+  return commit(diagram, (next) => { next.pathways.push({ id: newId('path'), name: input.name.trim(), color: input.color, lineStyle: input.lineStyle, description: input.description?.trim() || undefined, visible: input.visible ?? true, order: input.order ?? next.pathways.length * 10 + 10, nodeIds: [...input.nodeIds] }); });
 }
-export function updatePathway(diagram: Diagram, id: string, input: PathwayInput): Diagram {
-  validatePathwayInput(diagram, input);
-  return commit(diagram, (next) => { const pathway = next.pathways.find((x) => x.id === id); if (!pathway) fail('REFERENCE_NOT_FOUND', `pathways.${id}`); Object.assign(pathway, { name: input.name.trim(), color: input.color, lineStyle: input.lineStyle, description: input.description?.trim() || undefined, visible: input.visible ?? pathway.visible }); if (input.order !== undefined) pathway.order = input.order; const existing = new Map(pathway.steps.map((x) => [x.nodeId, x.id])); pathway.steps = input.nodeIds.map((nodeId, index) => ({ id: existing.get(nodeId) ?? newId('step'), nodeId, order: (index + 1) * 10 })); });
+export function updatePathwayMetadata(diagram: Diagram, id: string, input: PathwayMetadataInput): Diagram {
+  validatePathwayMetadata(input);
+  return commit(diagram, (next) => { const pathway = next.pathways.find((x) => x.id === id); if (!pathway) fail('REFERENCE_NOT_FOUND', `pathways.${id}`); Object.assign(pathway, { name: input.name.trim(), color: input.color, lineStyle: input.lineStyle, description: input.description?.trim() || undefined, visible: input.visible ?? pathway.visible }); });
+}
+export function addPathwayNode(diagram: Diagram, id: string, nodeId: string): Diagram {
+  if (!diagram.nodes.some((node) => node.id === nodeId)) fail('REFERENCE_NOT_FOUND', 'nodeId');
+  const pathway = diagram.pathways.find((item) => item.id === id); if (!pathway) fail('REFERENCE_NOT_FOUND', `pathways.${id}`);
+  if (pathway.nodeIds.includes(nodeId)) fail('PATHWAY_DUPLICATE_NODE', 'nodeId');
+  return commit(diagram, (next) => { next.pathways.find((item) => item.id === id)!.nodeIds.push(nodeId); });
+}
+export function removePathwayNode(diagram: Diagram, id: string, nodeId: string): Diagram {
+  const pathway = diagram.pathways.find((item) => item.id === id); if (!pathway) fail('REFERENCE_NOT_FOUND', `pathways.${id}`);
+  if (!pathway.nodeIds.includes(nodeId)) fail('REFERENCE_NOT_FOUND', 'nodeId');
+  const remaining = pathway.nodeIds.filter((item) => item !== nodeId);
+  validatePathwayNodes(diagram, remaining);
+  return commit(diagram, (next) => { next.pathways.find((item) => item.id === id)!.nodeIds = remaining; });
 }
 export function deletePathway(diagram: Diagram, id: string): Diagram { return commit(diagram, (next) => { if (!next.pathways.some((x) => x.id === id)) fail('REFERENCE_NOT_FOUND', `pathways.${id}`); next.pathways = next.pathways.filter((x) => x.id !== id); }); }
-export function reorderPathwaySteps(diagram: Diagram, id: string, nodeIds: string[]): Diagram {
-  const pathway = diagram.pathways.find((x) => x.id === id); if (!pathway) fail('REFERENCE_NOT_FOUND', `pathways.${id}`);
-  return updatePathway(diagram, id, { ...pathway, nodeIds });
-}
 export function setPathwayVisibility(diagram: Diagram, id: string, visible: boolean): Diagram { return commit(diagram, (next) => { const pathway = next.pathways.find((x) => x.id === id); if (!pathway) fail('REFERENCE_NOT_FOUND', `pathways.${id}`); pathway.visible = visible; }); }
 export function updateLayoutConfig(diagram: Diagram, input: Partial<LayoutConfig>): Diagram { return commit(diagram, (next) => { next.layout = { ...next.layout, ...input }; }); }
 
@@ -194,5 +212,12 @@ export type DiagramCommand = (diagram: Diagram) => Diagram;
 export interface CommandRecord { label: string; before: Diagram; after: Diagram }
 
 export function getDeleteNodeImpact(diagram: Diagram, nodeId: string): { pathway: Pathway; afterNodes: DiagramNode[]; blocked: boolean }[] {
-  return diagram.pathways.filter((x) => x.steps.some((step) => step.nodeId === nodeId)).map((pathway) => ({ pathway, afterNodes: pathway.steps.filter((x) => x.nodeId !== nodeId).map((step) => diagram.nodes.find((x) => x.id === step.nodeId)).filter((x): x is DiagramNode => Boolean(x)), blocked: pathway.steps.length - 1 < 2 }));
+  return diagram.pathways.filter((pathway) => pathway.nodeIds.includes(nodeId)).map((pathway) => {
+    const remaining = pathway.nodeIds.filter((id) => id !== nodeId);
+    return {
+      pathway,
+      afterNodes: remaining.map((id) => diagram.nodes.find((node) => node.id === id)).filter((node): node is DiagramNode => Boolean(node)),
+      blocked: pathwayLayerGroups(diagram, remaining).length < 2,
+    };
+  });
 }

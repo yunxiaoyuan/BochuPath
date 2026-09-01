@@ -49,7 +49,7 @@ test("fits the complete TB/LR canvas and renders directed arrows at 1440x900", a
     await expect(edge).toHaveAttribute("marker-end", /url\(/);
 });
 
-test("reorders pathway steps with the canvas and persists node order", async ({
+test("reorders graph members with the canvas and persists node order", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
@@ -164,20 +164,46 @@ test("shows an arrowed draft edge and clears the complete draft with Escape", as
       (element) => (element as SVGPathElement).style.strokeDasharray,
     ),
   ).not.toBe("");
-  await expect(page.getByText("已选 2 个")).toBeVisible();
+  await expect(page.getByText(/已选 2 个节点 · 2 层/)).toBeVisible();
   await expect(page.getByRole("button", { name: "完成", exact: true })).toBeEnabled();
 
   await page.keyboard.press("Escape");
   await expect(page.locator(".draft-edge")).toHaveCount(0);
   await expect(page.getByText("✓ 已保存")).toBeVisible();
 
-  await page.getByRole("button", { name: /连接/ }).click();
+  await page.getByRole("button", { name: /新建通路/ }).click();
   await page.getByRole("button", { name: /需求确认，位于 需求层/ }).click();
   await page.getByRole("button", { name: /方案评审，位于 方案层/ }).click();
   await page.getByRole("button", { name: "完成", exact: true }).click();
   await expect(page.getByRole("heading", { name: "通路属性" })).toBeVisible();
   await expect(page.locator(".react-flow__edge-path")).toHaveCount(3);
   await expect(page.getByLabel("撤销")).toBeEnabled();
+});
+
+test("fully connects two nodes in each occupied layer", async ({ page }) => {
+  await page.goto("/diagrams/diagram_demo/edit");
+
+  await page.getByTitle("新增节点").click();
+  await page.getByLabel("节点名称").fill("需求补充");
+  await page.getByLabel("所属叶子层级").selectOption({ label: "需求层" });
+  await page.getByRole("button", { name: "确定" }).click();
+
+  await page.getByTitle("新增节点").click();
+  await page.getByLabel("节点名称").fill("交付补充");
+  await page.getByLabel("所属叶子层级").selectOption({ label: "交付层" });
+  await page.getByRole("button", { name: "确定" }).click();
+
+  await page.getByRole("button", { name: /新建通路/ }).click();
+  await page.getByRole("button", { name: /需求确认，位于 需求层/ }).click();
+  await page.getByRole("button", { name: /需求补充，位于 需求层/ }).click();
+  await expect(page.locator(".draft-edge")).toHaveCount(0);
+  await page.getByRole("button", { name: /交付验收，位于 交付层/ }).click();
+  await expect(page.locator(".draft-edge")).toHaveCount(2);
+  await page.getByRole("button", { name: /交付补充，位于 交付层/ }).click();
+  await expect(page.locator(".draft-edge")).toHaveCount(4);
+  await expect(page.getByText("4 个节点 · 2 个占用层 · 4 条边")).toBeVisible();
+  await page.getByRole("button", { name: "完成", exact: true }).click();
+  await expect(page.locator(".react-flow__edge-path")).toHaveCount(6);
 });
 
 test("highlights every visible pathway node and edge in edit and view modes", async ({
@@ -218,19 +244,19 @@ test("edits same-layer and cross-layer pathway membership directly on the canvas
 
   await page.getByRole("tab", { name: "通路" }).click();
   await page.locator(".pathway-row").filter({ hasText: "主通路" }).locator(".row-main").click();
-  await page.getByRole("button", { name: "在画布编辑节点" }).click();
-  await expect(page.getByRole("heading", { name: "编辑通路" })).toBeVisible();
-  await expect(page.locator(".business-node.candidate")).toHaveCount(2);
+  await expect(page.getByRole("button", { name: "在画布编辑节点" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "通路属性" })).toBeVisible();
   const demandSupplement = page.getByRole("button", { name: /需求补充，位于 需求层/ });
   await demandSupplement.click();
-  await expect(page.getByText("已选 3 个")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "节点属性" })).toBeVisible();
+  await page.locator(".pathway-row").filter({ hasText: "主通路" }).locator(".row-main").click();
   await demandSupplement.click({ modifiers: ["Shift"] });
-  await expect(page.getByText("已选 4 个")).toBeVisible();
+  await expect(page.getByText("4 个节点 · 3 个占用层 · 3 条边")).toBeVisible();
   await demandSupplement.click({ modifiers: ["Shift"] });
-  await expect(page.getByText("已选 3 个")).toBeVisible();
+  await expect(page.getByText("3 个节点 · 3 个占用层 · 2 条边")).toBeVisible();
   await demandSupplement.click({ modifiers: ["Shift"] });
   await page.getByRole("button", { name: /运营复盘，位于 运营层/ }).click({ modifiers: ["Shift"] });
-  await page.getByRole("button", { name: "确定" }).click();
+  await expect(page.getByText("5 个节点 · 4 个占用层 · 4 条边")).toBeVisible();
   await expect(page.locator(".react-flow__edge-path")).toHaveCount(4);
 
   await page.getByRole("button", { name: "保存", exact: true }).click();
@@ -239,8 +265,8 @@ test("edits same-layer and cross-layer pathway membership directly on the canvas
   await expect(page.locator(".react-flow__edge-path")).toHaveCount(4);
   await page.getByRole("tab", { name: "通路" }).click();
   await page.locator(".pathway-row").filter({ hasText: "主通路" }).locator(".row-main").click();
-  await expect(page.getByLabel("通路步骤").getByText("需求补充", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("通路步骤").getByText("运营复盘", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("通路图结构").getByText(/需求补充/)).toBeVisible();
+  await expect(page.getByLabel("通路图结构").getByText(/运营复盘/)).toBeVisible();
 });
 
 test("creates and deletes a node through undoable domain commands", async ({

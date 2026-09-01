@@ -1,13 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { parseDiagram } from '../src/domain/schema';
 import { createBlankDiagram, createDemoDiagram } from '../src/domain/seed';
-import { validateDiagram } from '../src/domain/rules';
-import { orderedLeafLayers, sortPathwayNodeIds } from '../src/domain/layer-order';
+import { assertValid, validateDiagram } from '../src/domain/rules';
+import { orderedLeafLayers, pathwayEdgeCount, pathwayLayerGroups, sortPathwayNodeIds } from '../src/domain/layer-order';
 import { nodePathwayContext } from '../src/domain/selectors';
 
 describe('Diagram schema and invariants', () => {
-  it('parses the V1 seed and rejects unknown versions', () => {
-    expect(parseDiagram(createDemoDiagram()).schemaVersion).toBe('1.0');
+  it('parses V1.1, migrates the V1.0 step chain, and rejects unknown versions', () => {
+    const current = createDemoDiagram();
+    expect(parseDiagram(current).schemaVersion).toBe('1.1');
+    const legacy = {
+      ...current,
+      schemaVersion: '1.0',
+      pathways: current.pathways.map(({ nodeIds, ...pathway }) => ({
+        ...pathway,
+        steps: nodeIds.map((nodeId, index) => ({ id: `step_${index}`, nodeId, order: (index + 1) * 10 })),
+      })),
+    };
+    const migrated = parseDiagram(legacy);
+    expect(migrated.schemaVersion).toBe('1.1');
+    expect(migrated.pathways[0]?.nodeIds).toEqual(current.pathways[0]?.nodeIds);
+    expect(migrated.pathways[0]).not.toHaveProperty('steps');
+    const invalidLegacy = structuredClone(legacy);
+    invalidLegacy.pathways[0]!.steps = invalidLegacy.pathways[0]!.steps.slice(0, 1);
+    expect(() => assertValid(parseDiagram(invalidLegacy))).toThrow('PATHWAY_MIN_LAYERS');
     expect(() => parseDiagram({ ...createDemoDiagram(), schemaVersion: '2.0' })).toThrow('SCHEMA_VERSION_UNSUPPORTED');
   });
   it('reports missing references and non-leaf node ownership', () => {
@@ -34,24 +50,22 @@ describe('Diagram schema and invariants', () => {
     ]);
     expect(validateDiagram(diagram)).toHaveLength(0);
   });
-  it('allows skipped layers and same-layer steps while rejecting reverse visual order', () => {
+  it('allows skipped canvas layers and same-layer members but requires two occupied layers', () => {
     const skipped = createDemoDiagram();
-    skipped.pathways[0]!.steps.splice(1, 1);
-    expect(validateDiagram(skipped).map((issue) => issue.code)).not.toContain('PATHWAY_LAYER_ORDER_INVALID');
+    skipped.pathways[0]!.nodeIds.splice(1, 1);
+    expect(validateDiagram(skipped)).toHaveLength(0);
+    expect(pathwayLayerGroups(skipped, skipped.pathways[0]!.nodeIds).map((group) => group.layer.id)).toEqual([
+      'layer_demand', 'layer_delivery',
+    ]);
 
     const sameLayer = createDemoDiagram();
     sameLayer.nodes[1]!.layerId = 'layer_demand';
     sameLayer.nodes[1]!.order = 20;
-    expect(validateDiagram(sameLayer).map((issue) => issue.code)).not.toContain('PATHWAY_LAYER_ORDER_INVALID');
+    expect(validateDiagram(sameLayer)).toHaveLength(0);
+    expect(pathwayEdgeCount(sameLayer, sameLayer.pathways[0]!.nodeIds)).toBe(2);
 
-    sameLayer.pathways[0]!.steps[0]!.nodeId = 'node_solution';
-    sameLayer.pathways[0]!.steps[1]!.nodeId = 'node_demand';
-    expect(validateDiagram(sameLayer).map((issue) => issue.code)).toContain('PATHWAY_LAYER_ORDER_INVALID');
-
-    const upward = createDemoDiagram();
-    upward.pathways[0]!.steps[0]!.nodeId = 'node_delivery';
-    upward.pathways[0]!.steps[2]!.nodeId = 'node_demand';
-    expect(validateDiagram(upward).map((issue) => issue.code)).toContain('PATHWAY_LAYER_ORDER_INVALID');
+    sameLayer.pathways[0]!.nodeIds = ['node_solution', 'node_demand'];
+    expect(validateDiagram(sameLayer).map((issue) => issue.code)).toContain('PATHWAY_MIN_LAYERS');
   });
   it('sorts selected pathway nodes by fixed layer and same-layer node order', () => {
     const diagram = createDemoDiagram();

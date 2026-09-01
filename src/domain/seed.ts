@@ -4,7 +4,7 @@ export const DEMO_DIAGRAM_ID = 'diagram_demo';
 
 export function createDemoDiagram(): Diagram {
   return {
-    schemaVersion: '1.0', id: DEMO_DIAGRAM_ID, name: '需求到交付示例', description: '用于验证分层、节点样式和跨层通路', revision: 1,
+    schemaVersion: '1.1', id: DEMO_DIAGRAM_ID, name: '需求到交付示例', description: '用于验证分层、节点样式和跨层通路', revision: 1,
     layers: [
       { id: 'layer_demand', parentId: null, name: '需求层', order: 10 },
       { id: 'layer_solution', parentId: null, name: '方案层', order: 20 },
@@ -19,8 +19,8 @@ export function createDemoDiagram(): Diagram {
       { id: 'style_confirmed', name: '已确认', shape: 'roundedRect', fillColor: '#EAF7EF', borderColor: '#2E8B57', borderStyle: 'solid', borderWidth: 1, borderRadius: 4, textColor: '#1F2329', isDefault: true, isSystem: true },
       { id: 'style_review', name: '待评审', shape: 'roundedRect', fillColor: '#FFF5E6', borderColor: '#C97A00', borderStyle: 'dashed', borderWidth: 1, borderRadius: 4, textColor: '#1F2329', isDefault: false, isSystem: false },
     ],
-    pathways: [{ id: 'path_main', name: '主通路', color: '#2F64F7', lineStyle: 'solid', visible: true, order: 10, steps: [
-      { id: 'step_1', nodeId: 'node_demand', order: 10 }, { id: 'step_2', nodeId: 'node_solution', order: 20 }, { id: 'step_3', nodeId: 'node_delivery', order: 30 },
+    pathways: [{ id: 'path_main', name: '主通路', color: '#2F64F7', lineStyle: 'solid', visible: true, order: 10, nodeIds: [
+      'node_demand', 'node_solution', 'node_delivery',
     ] }],
     layout: { direction: 'TB', layerGap: 32, nodeGap: 24, nodeWidth: 180, nodeMinHeight: 64, fontSize: 14, descriptionFontSize: 12 },
     createdAt: '2026-08-28T12:00:00.000Z', updatedAt: '2026-08-28T12:00:00.000Z',
@@ -30,7 +30,7 @@ export function createDemoDiagram(): Diagram {
 export function createBlankDiagram(name: string, id = newId('diagram')): Diagram {
   const now = new Date().toISOString();
   return {
-    schemaVersion: '1.0', id, name: name.trim(), revision: 0, layers: [], nodes: [], pathways: [],
+    schemaVersion: '1.1', id, name: name.trim(), revision: 0, layers: [], nodes: [], pathways: [],
     nodeStyles: [{ id: newId('style'), name: '默认样式', shape: 'roundedRect', fillColor: '#EEF3FF', borderColor: '#2F64F7', borderStyle: 'solid', borderWidth: 1, borderRadius: 4, textColor: '#1F2329', isDefault: true, isSystem: true }],
     layout: { direction: 'TB', layerGap: 32, nodeGap: 24, nodeWidth: 180, nodeMinHeight: 64, fontSize: 14, descriptionFontSize: 12 }, createdAt: now, updatedAt: now,
   };

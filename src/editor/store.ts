@@ -43,7 +43,6 @@ interface EditorState {
   select: (selection: Selection, additive?: boolean) => void;
   focusPathway: (id: string | null) => void;
   setPathwayDraft: (draft: PathwayDraft | null) => void;
-  startPathwayDraft: (draft: PathwayDraft) => void;
   undo: () => void;
   redo: () => void;
   save: () => Promise<void>;
@@ -121,14 +120,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   setMode: (mode) => {
     const state = get();
+    const exitsPathway = state.selection?.kind === "pathway" || state.selection?.kind === "pathwayDraft";
     set({
       mode,
       tool: "select",
       pathwayDraft: null,
-      selection:
-        state.selection?.kind === "pathwayDraft" && state.diagram
-          ? { kind: "diagram", id: state.diagram.id }
-          : state.selection,
+      selection: exitsPathway ? null : state.selection,
+      focusedPathwayId: exitsPathway ? null : state.focusedPathwayId,
       message: mode === "view" ? "已切换到查看模式" : "已切换到编辑模式",
     });
   },
@@ -138,7 +136,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       set({
         tool,
         pathwayDraft: {
-          pathwayId: null,
           name: "新通路",
           nodeIds: [],
           color: "#2F64F7",
@@ -204,22 +201,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     )
       return;
     set({
+      tool: id ? "select" : state.tool,
+      pathwayDraft: id ? null : state.pathwayDraft,
       focusedPathwayId: id,
       selection: id ? { kind: "pathway", id } : null,
       multiSelectedNodeIds: [],
     });
   },
   setPathwayDraft: (pathwayDraft) => set({ pathwayDraft }),
-  startPathwayDraft: (pathwayDraft) =>
-    set({
-      tool: "connectPathway",
-      pathwayDraft,
-      selection: pathwayDraft.pathwayId
-        ? { kind: "pathway", id: pathwayDraft.pathwayId }
-        : { kind: "pathwayDraft", id: "new" },
-      multiSelectedNodeIds: [],
-      focusedPathwayId: pathwayDraft.pathwayId,
-    }),
   undo: () => {
     const state = get();
     if (state.mode !== "edit" || !state.diagram) return;

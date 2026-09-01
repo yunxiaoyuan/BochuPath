@@ -6,7 +6,7 @@ test("PageDrop collaborators share saves and stale saves keep a local draft", as
   browser,
 }) => {
   let sharedState: BochuPathSharedState = {
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     revision: 1,
     updatedAt: "2026-08-30T00:00:00.000Z",
     lastMutationId: "seed_v1",
@@ -51,7 +51,7 @@ test("PageDrop Inspector confirms layer, node and batch creation", async ({
   baseURL,
 }) => {
   let sharedState: BochuPathSharedState = {
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     revision: 1,
     updatedAt: "2026-08-30T00:00:00.000Z",
     lastMutationId: "seed_v1",
@@ -97,7 +97,7 @@ test("PageDrop sandbox creates a runnable blank diagram", async ({
   baseURL,
 }) => {
   let sharedState: BochuPathSharedState = {
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     revision: 1,
     updatedAt: "2026-08-30T00:00:00.000Z",
     lastMutationId: "seed_v1",
@@ -163,7 +163,7 @@ test("PageDrop sandbox edits downward pathways and highlights complete node cont
     order: 20,
   });
   let sharedState: BochuPathSharedState = {
-    schemaVersion: "1.0",
+    schemaVersion: "1.1",
     revision: 1,
     updatedAt: "2026-08-31T00:00:00.000Z",
     lastMutationId: "seed_pathway",
@@ -200,9 +200,9 @@ test("PageDrop sandbox edits downward pathways and highlights complete node cont
     (await demandAlt.boundingBox())!.x < (await demand.boundingBox())!.x,
   ).toBe(true);
 
-  await app.getByRole("button", { name: /连接/ }).click();
+  await app.getByRole("button", { name: /新建通路/ }).click();
   await app.getByRole("button", { name: /需求确认，位于 需求层/ }).click();
-  await expect(app.getByText("已选 1 个")).toBeVisible();
+  await expect(app.getByText(/已选 1 个节点 · 1 层/)).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(app.getByRole("heading", { name: "新建通路" })).toHaveCount(0);
   await app.getByRole("button", { name: "放大" }).click();
@@ -210,12 +210,11 @@ test("PageDrop sandbox edits downward pathways and highlights complete node cont
 
   await app.getByRole("tab", { name: "通路" }).click();
   await app.locator(".pathway-row").filter({ hasText: "主通路" }).locator(".row-main").click();
-  await app.getByRole("button", { name: "在画布编辑节点" }).click();
-  await expect(app.locator(".business-node.candidate")).toHaveCount(2);
+  await expect(app.getByRole("button", { name: "在画布编辑节点" })).toHaveCount(0);
   await app.locator("html").evaluate((element) => { element.style.zoom = "2"; });
-  await expect(app.getByText(/普通点击仍用于选择节点/).first()).toBeVisible();
+  await expect(app.getByText(/当前通路已可直接编辑/).first()).toBeVisible();
   await app.getByRole("button", { name: /运营复盘，位于 运营层/ }).click({ modifiers: ["Shift"] });
-  await app.getByRole("button", { name: "确定" }).click();
+  await expect(app.getByText("4 个节点 · 4 个占用层 · 3 条边")).toBeVisible();
   await app.locator("html").evaluate((element) => { element.style.zoom = ""; });
 
   await expect(app.getByText("● 有未保存修改")).toBeVisible();
@@ -225,7 +224,7 @@ test("PageDrop sandbox edits downward pathways and highlights complete node cont
   await leaveDialog.getByRole("button", { name: "取消" }).click();
   await app.getByRole("button", { name: "保存", exact: true }).click();
   await expect(app.getByText("✓ 已保存")).toBeVisible();
-  expect(sharedState.diagrams[0]?.pathways[0]?.steps.map((step) => step.nodeId)).toEqual([
+  expect(sharedState.diagrams[0]?.pathways[0]?.nodeIds).toEqual([
     "node_demand", "node_solution", "node_delivery", "node_operation",
   ]);
 
