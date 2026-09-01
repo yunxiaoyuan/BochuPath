@@ -145,7 +145,6 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           lineStyle: "solid",
           description: "",
           visible: true,
-          candidateAction: { kind: "insert", index: 0 },
         },
         selection: { kind: "pathwayDraft", id: "new" },
         multiSelectedNodeIds: [],

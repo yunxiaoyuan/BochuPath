@@ -23,7 +23,7 @@ test("light and dark edit workspaces have no automatically detectable WCAG A/AA 
   await page.getByRole("tab", { name: "通路" }).click();
   await page.getByRole("button", { name: /新增通路/ }).click();
   await page.getByRole("button", { name: /需求确认，位于 需求层/ }).click();
-  await expect(page.getByRole("region", { name: "合法候选节点" })).toBeVisible();
+  await expect(page.getByText("已选 1 个")).toBeVisible();
   const pathwayDraftResult = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze();

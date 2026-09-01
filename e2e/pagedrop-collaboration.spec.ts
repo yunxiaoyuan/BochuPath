@@ -210,13 +210,12 @@ test("PageDrop sandbox edits downward pathways and highlights complete node cont
 
   await app.getByRole("tab", { name: "通路" }).click();
   await app.locator(".pathway-row").filter({ hasText: "主通路" }).locator(".row-main").click();
-  await app.getByRole("button", { name: /添加下游节点/ }).click();
-  await expect(app.locator(".business-node.candidate")).toHaveCount(1);
-  await expect(app.locator('.react-flow__node-business[data-id="node_demand_alt"] .business-node')).toHaveClass(/dimmed/);
+  await app.getByRole("button", { name: "在画布编辑节点" }).click();
+  await expect(app.locator(".business-node.candidate")).toHaveCount(2);
   await app.locator("html").evaluate((element) => { element.style.zoom = "2"; });
-  await expect(app.getByRole("region", { name: "合法候选节点" })).toBeVisible();
-  await app.getByRole("button", { name: /运营复盘，位于 运营层/ }).click();
-  await app.getByRole("button", { name: "确定" }).press("Enter");
+  await expect(app.getByText(/普通点击仍用于选择节点/).first()).toBeVisible();
+  await app.getByRole("button", { name: /运营复盘，位于 运营层/ }).click({ modifiers: ["Shift"] });
+  await app.getByRole("button", { name: "确定" }).click();
   await app.locator("html").evaluate((element) => { element.style.zoom = ""; });
 
   await expect(app.getByText("● 有未保存修改")).toBeVisible();

@@ -49,7 +49,7 @@ test("fits the complete TB/LR canvas and renders directed arrows at 1440x900", a
     await expect(edge).toHaveAttribute("marker-end", /url\(/);
 });
 
-test("blocks layer reorder that reverses a pathway and persists valid node order", async ({
+test("reorders pathway steps with the canvas and persists node order", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
@@ -59,9 +59,8 @@ test("blocks layer reorder that reverses a pathway and persists valid node order
   const demandLayer = page.locator('.react-flow__node-layer[data-id="layer::layer_demand"]');
   const deliveryLayer = page.locator('.react-flow__node-layer[data-id="layer::layer_delivery"]');
   await dragCanvasNode(page, demandLayer, deliveryLayer, "header");
-  await expect(page.getByText(/通路必须从上层依次指向下层.*主通路/)).toBeVisible();
   await expect.poll(async () =>
-    (await demandLayer.boundingBox())!.y < (await deliveryLayer.boundingBox())!.y,
+    (await demandLayer.boundingBox())!.y > (await deliveryLayer.boundingBox())!.y,
   ).toBe(true);
 
   await page.getByTitle("批量添加层级或节点").click();
@@ -87,7 +86,7 @@ test("blocks layer reorder that reverses a pathway and persists valid node order
   await expect(page.getByText("✓ 已保存")).toBeVisible();
   await page.reload();
   await expect(page.getByLabel("通路图画布")).toBeVisible();
-  expect((await demandLayer.boundingBox())!.y).toBeLessThan((await deliveryLayer.boundingBox())!.y);
+  expect((await demandLayer.boundingBox())!.y).toBeGreaterThan((await deliveryLayer.boundingBox())!.y);
   expect((await demandNode.boundingBox())!.x).toBeGreaterThan((await archiveNode.boundingBox())!.x);
   expect((await demandNode.boundingBox())!.x).toBeLessThan((await laterNode.boundingBox())!.x);
 });
@@ -154,8 +153,8 @@ test("shows an arrowed draft edge and clears the complete draft with Escape", as
 
   await page.getByRole("button", { name: /需求确认，位于 需求层/ }).click();
   await expect(
-    page.getByRole("button", { name: "完成通路", exact: true }),
-  ).toHaveCount(0);
+    page.getByRole("button", { name: "完成", exact: true }),
+  ).toBeDisabled();
   await page.getByRole("button", { name: /方案评审，位于 方案层/ }).click();
   const draft = page.locator(".draft-edge .react-flow__edge-path");
   await expect(draft).toHaveCount(1);
@@ -166,7 +165,7 @@ test("shows an arrowed draft edge and clears the complete draft with Escape", as
     ),
   ).not.toBe("");
   await expect(page.getByText("已选 2 个")).toBeVisible();
-  await expectPathwayFinishNearLastNode(page, "node_solution");
+  await expect(page.getByRole("button", { name: "完成", exact: true })).toBeEnabled();
 
   await page.keyboard.press("Escape");
   await expect(page.locator(".draft-edge")).toHaveCount(0);
@@ -175,9 +174,7 @@ test("shows an arrowed draft edge and clears the complete draft with Escape", as
   await page.getByRole("button", { name: /连接/ }).click();
   await page.getByRole("button", { name: /需求确认，位于 需求层/ }).click();
   await page.getByRole("button", { name: /方案评审，位于 方案层/ }).click();
-  await page
-    .getByRole("button", { name: "完成通路", exact: true })
-    .click();
+  await page.getByRole("button", { name: "完成", exact: true }).click();
   await expect(page.getByRole("heading", { name: "通路属性" })).toBeVisible();
   await expect(page.locator(".react-flow__edge-path")).toHaveCount(3);
   await expect(page.getByLabel("撤销")).toBeEnabled();
@@ -201,7 +198,7 @@ test("highlights every visible pathway node and edge in edit and view modes", as
   await expect(page.locator(".react-flow__edge.related-edge")).toHaveCount(0);
 });
 
-test("appends a layer-filtered node to an existing pathway and reopens it", async ({
+test("edits same-layer and cross-layer pathway membership directly on the canvas", async ({
   page,
 }) => {
   await page.goto("/diagrams/diagram_demo/edit");
@@ -214,21 +211,35 @@ test("appends a layer-filtered node to an existing pathway and reopens it", asyn
   await page.getByLabel("所属叶子层级").selectOption({ label: "运营层" });
   await page.getByRole("button", { name: "确定" }).click();
 
+  await page.getByTitle("新增节点").click();
+  await page.getByLabel("节点名称").fill("需求补充");
+  await page.getByLabel("所属叶子层级").selectOption({ label: "需求层" });
+  await page.getByRole("button", { name: "确定" }).click();
+
   await page.getByRole("tab", { name: "通路" }).click();
   await page.locator(".pathway-row").filter({ hasText: "主通路" }).locator(".row-main").click();
-  await page.getByRole("button", { name: /添加下游节点/ }).click();
+  await page.getByRole("button", { name: "在画布编辑节点" }).click();
   await expect(page.getByRole("heading", { name: "编辑通路" })).toBeVisible();
-  await expect(page.locator(".business-node.candidate")).toHaveCount(1);
-  await page.getByRole("option", { name: /运营复盘/ }).click();
+  await expect(page.locator(".business-node.candidate")).toHaveCount(2);
+  const demandSupplement = page.getByRole("button", { name: /需求补充，位于 需求层/ });
+  await demandSupplement.click();
+  await expect(page.getByText("已选 3 个")).toBeVisible();
+  await demandSupplement.click({ modifiers: ["Shift"] });
+  await expect(page.getByText("已选 4 个")).toBeVisible();
+  await demandSupplement.click({ modifiers: ["Shift"] });
+  await expect(page.getByText("已选 3 个")).toBeVisible();
+  await demandSupplement.click({ modifiers: ["Shift"] });
+  await page.getByRole("button", { name: /运营复盘，位于 运营层/ }).click({ modifiers: ["Shift"] });
   await page.getByRole("button", { name: "确定" }).click();
-  await expect(page.locator(".react-flow__edge-path")).toHaveCount(3);
+  await expect(page.locator(".react-flow__edge-path")).toHaveCount(4);
 
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByText("✓ 已保存")).toBeVisible();
   await page.reload();
-  await expect(page.locator(".react-flow__edge-path")).toHaveCount(3);
+  await expect(page.locator(".react-flow__edge-path")).toHaveCount(4);
   await page.getByRole("tab", { name: "通路" }).click();
   await page.locator(".pathway-row").filter({ hasText: "主通路" }).locator(".row-main").click();
+  await expect(page.getByLabel("通路步骤").getByText("需求补充", { exact: true })).toBeVisible();
   await expect(page.getByLabel("通路步骤").getByText("运营复盘", { exact: true })).toBeVisible();
 });
 
@@ -356,64 +367,4 @@ async function dragCanvasNode(
       : Math.abs(shiftedTargetBox!.x - targetBox!.x);
   }).toBeGreaterThan(8);
   await page.mouse.up();
-}
-
-async function expectPathwayFinishNearLastNode(
-  page: Page,
-  lastNodeId: string,
-): Promise<void> {
-  const toolbar = page.locator(".pathway-finish-toolbar");
-  const action = page.getByRole("button", { name: "完成通路", exact: true });
-  await expect(toolbar).toBeVisible();
-  await expect(action).toBeVisible();
-  await expect(toolbar).toHaveAttribute(
-    "data-placement",
-    /bottom|right|left|top/,
-  );
-
-  const actionBox = await action.boundingBox();
-  const lastNodeBox = await page
-    .locator(`.react-flow__node-business[data-id="${lastNodeId}"]`)
-    .boundingBox();
-  expect(actionBox).not.toBeNull();
-  expect(lastNodeBox).not.toBeNull();
-  expect(rectangleGap(actionBox!, lastNodeBox!)).toBeLessThanOrEqual(14);
-
-  const otherNodes = page.locator(
-    `.react-flow__node-business:not([data-id="${lastNodeId}"])`,
-  );
-  for (const node of await otherNodes.all()) {
-    const box = await node.boundingBox();
-    expect(box).not.toBeNull();
-    expect(overlaps(actionBox!, box!)).toBe(false);
-  }
-}
-
-function rectangleGap(
-  left: { x: number; y: number; width: number; height: number },
-  right: { x: number; y: number; width: number; height: number },
-): number {
-  const horizontal = Math.max(
-    0,
-    right.x - (left.x + left.width),
-    left.x - (right.x + right.width),
-  );
-  const vertical = Math.max(
-    0,
-    right.y - (left.y + left.height),
-    left.y - (right.y + right.height),
-  );
-  return Math.hypot(horizontal, vertical);
-}
-
-function overlaps(
-  left: { x: number; y: number; width: number; height: number },
-  right: { x: number; y: number; width: number; height: number },
-): boolean {
-  return !(
-    left.x + left.width <= right.x ||
-    right.x + right.width <= left.x ||
-    left.y + left.height <= right.y ||
-    right.y + right.height <= left.y
-  );
 }

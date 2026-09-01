@@ -112,8 +112,4 @@ export interface PathwayDraft {
   lineStyle: "solid" | "dashed";
   description: string;
   visible: boolean;
-  candidateAction:
-    | { kind: "insert"; index: number }
-    | { kind: "replace"; index: number }
-    | null;
 }

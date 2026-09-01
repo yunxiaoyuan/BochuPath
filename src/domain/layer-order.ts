@@ -1,4 +1,4 @@
-import type { Diagram, Layer } from "./types";
+import type { Diagram, DiagramNode, Layer } from "./types";
 
 function stableLayers(layers: Layer[]): Layer[] {
   return [...layers].sort(
@@ -30,4 +30,25 @@ export function orderedLeafLayers(diagram: Diagram): Layer[] {
 
 export function leafLayerIndexMap(diagram: Diagram): Map<string, number> {
   return new Map(orderedLeafLayers(diagram).map((layer, index) => [layer.id, index]));
+}
+
+/**
+ * Returns business nodes in the fixed order shown on the canvas: leaf-layer
+ * order first, then the node order inside that leaf layer.
+ */
+export function orderedDiagramNodes(diagram: Diagram): DiagramNode[] {
+  const layerIndexes = leafLayerIndexMap(diagram);
+  return [...diagram.nodes].sort((left, right) =>
+    (layerIndexes.get(left.layerId) ?? Number.MAX_SAFE_INTEGER) -
+      (layerIndexes.get(right.layerId) ?? Number.MAX_SAFE_INTEGER) ||
+    left.order - right.order ||
+    left.id.localeCompare(right.id),
+  );
+}
+
+export function sortPathwayNodeIds(diagram: Diagram, nodeIds: string[]): string[] {
+  const selected = new Set(nodeIds);
+  return orderedDiagramNodes(diagram)
+    .filter((node) => selected.has(node.id))
+    .map((node) => node.id);
 }

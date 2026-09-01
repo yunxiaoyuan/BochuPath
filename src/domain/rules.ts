@@ -1,4 +1,4 @@
-import { leafLayerIndexMap } from './layer-order';
+import { sortPathwayNodeIds } from './layer-order';
 import type { Diagram, Layer } from './types';
 
 export type DomainErrorCode =
@@ -21,7 +21,7 @@ export const errorMessages: Record<DomainErrorCode, string> = {
   NODE_STYLE_NOT_FOUND: '节点样式不存在', NODE_DELETE_BREAKS_PATHWAY: '删除后会使通路少于两个节点，请先处理受影响通路',
   STYLE_DEFAULT_DELETE_FORBIDDEN: '默认或系统样式不能删除', STYLE_IN_USE_REPLACEMENT_REQUIRED: '该样式正在使用，请选择替代样式',
   PATHWAY_MIN_STEPS: '通路至少需要两个节点', PATHWAY_DUPLICATE_NODE: '同一通路不能重复包含节点',
-  PATHWAY_LAYER_ORDER_INVALID: '通路必须从上层依次指向下层，不能同层连接或向上回流',
+  PATHWAY_LAYER_ORDER_INVALID: '通路节点必须遵循画布中的层级与同层节点顺序，不能回流',
   PERSISTENCE_CONFLICT: '共享版本已更新，本地草稿已保留；请刷新查看最新版本并人工合并', PERSISTENCE_FAILED: '保存失败，内存中的修改仍保留', FIELD_INVALID: '字段内容不符合要求',
 };
 
@@ -56,22 +56,16 @@ export function validateDiagram(diagram: Diagram): DomainIssue[] {
     if (!styleIds.has(node.styleId)) issues.push(issue('NODE_STYLE_NOT_FOUND', `nodes.${node.id}.styleId`));
   });
   if (diagram.nodeStyles.filter((x) => x.isDefault).length !== 1 || !diagram.nodeStyles.some((x) => x.isDefault && x.isSystem)) issues.push(issue('STYLE_DEFAULT_DELETE_FORBIDDEN', 'nodeStyles'));
-  const layerIndexes = leafLayerIndexMap(diagram);
   diagram.pathways.forEach((pathway) => {
     if (pathway.steps.length < 2) issues.push(issue('PATHWAY_MIN_STEPS', `pathways.${pathway.id}.steps`));
     const ids = pathway.steps.map((x) => x.nodeId); if (new Set(ids).size !== ids.length) issues.push(issue('PATHWAY_DUPLICATE_NODE', `pathways.${pathway.id}.steps`));
     pathway.steps.forEach((step) => { if (!nodeIds.has(step.nodeId)) issues.push(issue('REFERENCE_NOT_FOUND', `pathways.${pathway.id}.steps.${step.id}`)); });
     const orderedSteps = sortStable(pathway.steps);
-    for (let index = 0; index < orderedSteps.length - 1; index += 1) {
-      const source = diagram.nodes.find((node) => node.id === orderedSteps[index]?.nodeId);
-      const target = diagram.nodes.find((node) => node.id === orderedSteps[index + 1]?.nodeId);
-      const sourceIndex = source ? layerIndexes.get(source.layerId) : undefined;
-      const targetIndex = target ? layerIndexes.get(target.layerId) : undefined;
-      if (sourceIndex !== undefined && targetIndex !== undefined && sourceIndex >= targetIndex) {
-        issues.push(issue('PATHWAY_LAYER_ORDER_INVALID', `pathways.${pathway.id}.steps.${orderedSteps[index + 1]?.id}`));
-        break;
-      }
-    }
+    const existingIds = orderedSteps.map((step) => step.nodeId).filter((id) => nodeIds.has(id));
+    const expectedIds = sortPathwayNodeIds(diagram, existingIds);
+    const invalidIndex = existingIds.findIndex((id, index) => id !== expectedIds[index]);
+    if (invalidIndex >= 0)
+      issues.push(issue('PATHWAY_LAYER_ORDER_INVALID', `pathways.${pathway.id}.steps.${orderedSteps[invalidIndex]?.id}`));
   });
   return issues;
 }
@@ -88,7 +82,17 @@ export function normalizeDiagram(diagram: Diagram): Diagram {
   const parents = new Set(diagram.layers.map((x) => x.parentId));
   parents.forEach((parentId) => normalizeOrders(diagram.layers.filter((x) => x.parentId === parentId)));
   const layerIds = new Set(diagram.nodes.map((x) => x.layerId)); layerIds.forEach((id) => normalizeOrders(diagram.nodes.filter((x) => x.layerId === id)));
-  normalizeOrders(diagram.pathways); diagram.pathways.forEach((pathway) => normalizeOrders(pathway.steps)); return diagram;
+  normalizeOrders(diagram.pathways);
+  diagram.pathways.forEach((pathway) => {
+    const ranks = new Map(sortPathwayNodeIds(diagram, pathway.steps.map((step) => step.nodeId)).map((id, index) => [id, index]));
+    pathway.steps.sort((left, right) =>
+      (ranks.get(left.nodeId) ?? Number.MAX_SAFE_INTEGER) -
+        (ranks.get(right.nodeId) ?? Number.MAX_SAFE_INTEGER) ||
+      left.id.localeCompare(right.id),
+    );
+    pathway.steps.forEach((step, index) => { step.order = (index + 1) * 10; });
+  });
+  return diagram;
 }
 
 export function layerDepth(diagram: Diagram, layer: Layer): number {

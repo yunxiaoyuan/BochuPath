@@ -219,7 +219,7 @@ describe("workspace command transactions and unified selection", () => {
     expect(useEditorStore.getState().history.past).toHaveLength(1);
   });
 
-  it("edits pathway steps through a layer-filtered draft and commits once", async () => {
+  it("keeps canvas pathway membership changes in one cancellable draft", async () => {
     const user = userEvent.setup();
     const diagram = structuredClone(useEditorStore.getState().diagram!);
     diagram.layers.push({ id: "layer_operation", parentId: null, name: "运营层", order: 40 });
@@ -247,9 +247,15 @@ describe("workspace command transactions and unified selection", () => {
       /></AppDialogProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: /添加下游节点/ }));
+    await user.click(screen.getByRole("button", { name: "在画布编辑节点" }));
     expect(screen.getByRole("heading", { name: "编辑通路" })).toBeInTheDocument();
-    await user.click(screen.getByRole("option", { name: /运营复盘/ }));
+    act(() => {
+      const draft = useEditorStore.getState().pathwayDraft!;
+      useEditorStore.getState().setPathwayDraft({
+        ...draft,
+        nodeIds: [...draft.nodeIds, "node_operation"],
+      });
+    });
     expect(useEditorStore.getState().pathwayDraft?.nodeIds).toEqual([
       "node_demand", "node_solution", "node_delivery", "node_operation",
     ]);
@@ -257,8 +263,14 @@ describe("workspace command transactions and unified selection", () => {
     expect(useEditorStore.getState().diagram?.pathways[0]?.steps).toHaveLength(3);
     expect(useEditorStore.getState().history.past).toHaveLength(0);
 
-    await user.click(screen.getByRole("button", { name: /添加下游节点/ }));
-    await user.click(screen.getByRole("option", { name: /运营复盘/ }));
+    await user.click(screen.getByRole("button", { name: "在画布编辑节点" }));
+    act(() => {
+      const draft = useEditorStore.getState().pathwayDraft!;
+      useEditorStore.getState().setPathwayDraft({
+        ...draft,
+        nodeIds: [...draft.nodeIds, "node_operation"],
+      });
+    });
     await user.click(screen.getByRole("button", { name: "确定" }));
     expect(useEditorStore.getState().diagram?.pathways[0]?.steps.map((step) => step.nodeId)).toEqual([
       "node_demand", "node_solution", "node_delivery", "node_operation",

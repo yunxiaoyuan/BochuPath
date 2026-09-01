@@ -7,7 +7,6 @@ import {
   Handle,
   MarkerType,
   MiniMap,
-  NodeToolbar,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -28,11 +27,11 @@ import type {
   NodeStyle,
 } from "../../../domain/types";
 import { descendantIds, sortStable } from "../../../domain/rules";
+import { orderedDiagramNodes, sortPathwayNodeIds } from "../../../domain/layer-order";
 import {
   fullLayerPath,
   nodePathwayContext,
   nodePathways,
-  pathwayCandidateNodes,
 } from "../../../domain/selectors";
 import {
   createPathway,
@@ -43,10 +42,6 @@ import {
 import { useEditorStore } from "../../../editor/store";
 import { deriveEdges } from "../../../layout/derive-edges";
 import { fitViewportToBounds } from "../../../layout/fit-viewport";
-import {
-  chooseNodeActionPosition,
-  type NodeActionPosition,
-} from "../../../layout/node-action-placement";
 import {
   layoutDiagram,
   type DiagramLayout,
@@ -71,11 +66,6 @@ interface BusinessData extends Record<string, unknown> {
   descriptionFontSize: number;
   canReorder: boolean;
   reorderAxis: "横向" | "纵向";
-  finishAction?: {
-    position: NodeActionPosition;
-    nodeName: string;
-    onFinish: () => void;
-  };
 }
 interface LayerData extends Record<string, unknown> {
   kind: "layer";
@@ -127,12 +117,13 @@ function CanvasInner({ mode, onCreateNode }: Props) {
   const focusPathway = useEditorStore((s) => s.focusPathway);
   const draft = useEditorStore((s) => s.pathwayDraft);
   const setDraft = useEditorStore((s) => s.setPathwayDraft);
+  const startPathwayDraft = useEditorStore((s) => s.startPathwayDraft);
   const execute = useEditorStore((s) => s.execute);
   const { setViewport, zoomIn, zoomOut } = useReactFlow<
     CanvasNode,
     CanvasEdge
   >();
-  const { x: viewportX, y: viewportY, zoom } = useViewport();
+  const { zoom } = useViewport();
   const stageRef = useRef<HTMLDivElement>(null);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const draggingRef = useRef(false);
@@ -160,34 +151,26 @@ function CanvasInner({ mode, onCreateNode }: Props) {
     () => new Set(selectedNodeContext?.visiblePathways.map((pathway) => pathway.id)),
     [selectedNodeContext],
   );
-  const draftCandidateIds = useMemo(() => {
-    const action = draft?.candidateAction;
-    if (!draft || !action) return new Set<string>();
-    const baseIds = action.kind === "replace"
-      ? draft.nodeIds.filter((_, index) => index !== action.index)
-      : draft.nodeIds;
-    return new Set(
-      pathwayCandidateNodes(diagram, baseIds, action.index).map((node) => node.id),
-    );
-  }, [diagram, draft]);
+  const draftCandidateIds = useMemo(
+    () => new Set(
+      draft
+        ? orderedDiagramNodes(diagram)
+            .filter((node) => !draft.nodeIds.includes(node.id))
+            .map((node) => node.id)
+        : [],
+    ),
+    [diagram, draft],
+  );
 
   const applyDraftCandidate = useCallback(
     (nodeId: string) => {
-      if (!draft?.candidateAction || !draftCandidateIds.has(nodeId)) return;
-      const action = draft.candidateAction;
-      const nodeIds = [...draft.nodeIds];
-      if (action.kind === "replace") nodeIds[action.index] = nodeId;
-      else nodeIds.splice(action.index, 0, nodeId);
+      if (!draft || !draftCandidateIds.has(nodeId)) return;
       setDraft({
         ...draft,
-        nodeIds,
-        candidateAction:
-          draft.pathwayId === null && action.kind === "insert"
-            ? { kind: "insert", index: action.index + 1 }
-            : null,
+        nodeIds: sortPathwayNodeIds(diagram, [...draft.nodeIds, nodeId]),
       });
     },
-    [draft, draftCandidateIds, setDraft],
+    [diagram, draft, draftCandidateIds, setDraft],
   );
 
   const finishDraft = useCallback(() => {
@@ -206,17 +189,18 @@ function CanvasInner({ mode, onCreateNode }: Props) {
     }
   }, [diagram.pathways, draft, execute, select, setTool]);
 
-  const finishPosition = useMemo<NodeActionPosition>(() => {
-    const lastId = draft?.nodeIds.at(-1);
-    const anchor = layout.nodes.find((node) => node.id === lastId);
-    if (!anchor) return "bottom";
-    return chooseNodeActionPosition(
-      anchor,
-      layout.nodes.filter((node) => node.id !== lastId),
-      { x: viewportX, y: viewportY, zoom },
-      stageSize,
-    );
-  }, [draft?.nodeIds, layout.nodes, stageSize, viewportX, viewportY, zoom]);
+  const removeDraftNode = useCallback(
+    (nodeId: string) => {
+      if (!draft) return;
+      if (!draft.nodeIds.includes(nodeId)) return;
+      const nodeIds = draft.nodeIds.filter((id) => id !== nodeId);
+      setDraft({
+        ...draft,
+        nodeIds,
+      });
+    },
+    [draft, setDraft],
+  );
 
   const derivedNodes = useMemo<CanvasNode[]>(() => {
     const layerNodes: LayerFlowNode[] = [...layout.layers]
@@ -264,15 +248,14 @@ function CanvasInner({ mode, onCreateNode }: Props) {
         : undefined;
       const draftStep = (draft?.nodeIds.indexOf(node.id) ?? -1) + 1;
       const step = draftStep > 0 ? draftStep : focusedStep;
-      const candidateMode = Boolean(draft?.candidateAction);
       const candidate = draftCandidateIds.has(node.id);
       const related = Boolean(
         selectedNodeContext?.relatedNodeIds.has(node.id) &&
         selection?.kind === "node" &&
         selection.id !== node.id,
       );
-      const dimmed = candidateMode
-        ? !candidate && draftStep <= 0
+      const dimmed = draft
+        ? false
         : focusedIds.size
           ? !focusedIds.has(node.id)
           : selectedNodeContext
@@ -289,12 +272,12 @@ function CanvasInner({ mode, onCreateNode }: Props) {
         zIndex: 4,
         draggable: canReorder,
         extent: canReorder ? nodeDragExtent(siblingRects) : undefined,
-        selectable: tool !== "connectPathway" || candidate,
+        selectable: tool !== "connectPathway" || candidate || draftStep > 0,
         focusable: true,
         selected:
           multiSelectedNodeIds.includes(node.id) || Boolean(draftStep > 0),
         ariaRole: "button",
-        ariaLabel: `${node.name}，位于 ${fullLayerPath(diagram, node.layerId)}，参与 ${participationCount} 条通路`,
+        ariaLabel: `${node.name}，位于 ${fullLayerPath(diagram, node.layerId)}，参与 ${participationCount} 条通路${draftStep > 0 ? "，Shift+空格从当前通路移除" : draft?.pathwayId ? "，Shift+空格加入当前通路" : draft ? "，空格加入当前通路" : ""}`,
         data: {
           kind: "business",
           node,
@@ -308,14 +291,6 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           descriptionFontSize: diagram.layout.descriptionFontSize,
           canReorder,
           reorderAxis: diagram.layout.direction === "TB" ? "横向" : "纵向",
-          finishAction:
-            draftStep === draft?.nodeIds.length && draftStep >= 2
-              ? {
-                  position: finishPosition,
-                  nodeName: node.name,
-                  onFinish: finishDraft,
-                }
-              : undefined,
         },
       };
     });
@@ -323,8 +298,6 @@ function CanvasInner({ mode, onCreateNode }: Props) {
   }, [
     diagram,
     draft,
-    finishDraft,
-    finishPosition,
     focusedPath,
     focusedIds,
     layout,
@@ -368,8 +341,7 @@ function CanvasInner({ mode, onCreateNode }: Props) {
         type: "parallel",
         source: edge.sourceNodeId,
         target: edge.targetNodeId,
-        sourceHandle: diagram.layout.direction === "TB" ? "bottom" : "right",
-        targetHandle: diagram.layout.direction === "TB" ? "top" : "left",
+        ...edgeHandleIds(source, target, layout.nodes, diagram.layout.direction),
         markerEnd: {
           type: MarkerType.ArrowClosed,
           color: edge.color,
@@ -410,8 +382,7 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           type: "parallel",
           source: nodeId,
           target: targetId,
-          sourceHandle: diagram.layout.direction === "TB" ? "bottom" : "right",
-          targetHandle: diagram.layout.direction === "TB" ? "top" : "left",
+          ...edgeHandleIds(source, target, layout.nodes, diagram.layout.direction),
           animated: true,
           markerEnd: {
             type: MarkerType.ArrowClosed,
@@ -440,7 +411,7 @@ function CanvasInner({ mode, onCreateNode }: Props) {
         };
       }) ?? [];
     return [...confirmed, ...candidates];
-  }, [diagram, draft, focused, relatedPathwayIds, selectedNodeContext, selection]);
+  }, [diagram, draft, focused, layout.nodes, relatedPathwayIds, selectedNodeContext, selection]);
 
   const fitCanvas = useCallback(
     (duration = 200) => {
@@ -496,7 +467,16 @@ function CanvasInner({ mode, onCreateNode }: Props) {
 
   const handleNodeClick = (event: React.MouseEvent, node: CanvasNode) => {
     if (node.data.kind === "business" && tool === "connectPathway" && draft) {
-      applyDraftCandidate(node.id);
+      const stepIndex = draft.nodeIds.indexOf(node.id);
+      if (draft.pathwayId) {
+        if (event.shiftKey) {
+          if (stepIndex >= 0) removeDraftNode(node.id);
+          else applyDraftCandidate(node.id);
+        } else selectCanvasNode(node);
+        return;
+      }
+      if (event.shiftKey && stepIndex >= 0) removeDraftNode(node.id);
+      else if (!event.shiftKey && draftCandidateIds.has(node.id)) applyDraftCandidate(node.id);
       return;
     }
     if (tool !== "connectPathway")
@@ -634,6 +614,13 @@ function CanvasInner({ mode, onCreateNode }: Props) {
     const id = flowElement?.dataset.id;
     if (!id) return;
 
+    if (event.key === "Enter" && tool === "connectPathway" && draft) {
+      event.preventDefault();
+      event.stopPropagation();
+      finishDraft();
+      return;
+    }
+
     if (event.altKey && mode === "edit" && tool === "select") {
       const backwardKey = diagram.layout.direction === "TB" ? "ArrowUp" : "ArrowLeft";
       const forwardKey = diagram.layout.direction === "TB" ? "ArrowDown" : "ArrowRight";
@@ -674,7 +661,14 @@ function CanvasInner({ mode, onCreateNode }: Props) {
     const node = flowNodes.find((item) => item.id === id);
     if (node) {
       if (node.data.kind === "business" && tool === "connectPathway" && draft) {
-        applyDraftCandidate(node.id);
+        const stepIndex = draft.nodeIds.indexOf(node.id);
+        if (draft.pathwayId) {
+          if (event.shiftKey) {
+            if (stepIndex >= 0) removeDraftNode(node.id);
+            else applyDraftCandidate(node.id);
+          } else selectCanvasNode(node);
+        } else if (event.shiftKey && stepIndex >= 0) removeDraftNode(node.id);
+        else if (!event.shiftKey && draftCandidateIds.has(node.id)) applyDraftCandidate(node.id);
         return;
       }
       if (tool !== "connectPathway")
@@ -754,11 +748,18 @@ function CanvasInner({ mode, onCreateNode }: Props) {
       {tool === "connectPathway" && (
         <div className="connect-guide" role="status">
           <span>
-            {draft?.candidateAction
-              ? `当前有 ${draftCandidateIds.size} 个合法候选；点击候选节点加入通路。`
-              : "请在右侧选择插入或替换位置；Enter 完成，Esc 取消。"}
+            {draft?.pathwayId
+              ? "编辑：普通点击选择节点，Shift+点击加入或移除；顺序由画布自动确定。"
+              : "新建：点击未选节点加入，Shift+点击已选节点移除；顺序由画布自动确定。"}
           </span>
           <strong>已选 {draft?.nodeIds.length ?? 0} 个</strong>
+          <button
+            className="primary-button"
+            disabled={!draft || draft.nodeIds.length < 2}
+            onClick={finishDraft}
+          >
+            完成
+          </button>
           <button onClick={() => setTool("select")}>取消</button>
         </div>
       )}
@@ -784,6 +785,22 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           onNodeDragStop={handleNodeDragStop}
           onEdgeClick={(_event, edge) => {
             if (edge.data?.pathwayId) focusPathway(edge.data.pathwayId);
+          }}
+          onEdgeDoubleClick={(_event, edge) => {
+            if (mode !== "edit" || !edge.data?.pathwayId) return;
+            const pathway = diagram.pathways.find((item) => item.id === edge.data?.pathwayId);
+            if (!pathway) return;
+            startPathwayDraft({
+              pathwayId: pathway.id,
+              name: pathway.name,
+              nodeIds: [...pathway.steps]
+                .sort((left, right) => left.order - right.order)
+                .map((step) => step.nodeId),
+              color: pathway.color,
+              lineStyle: pathway.lineStyle,
+              description: pathway.description ?? "",
+              visible: pathway.visible,
+            });
           }}
           onPaneClick={() => {
             if (tool !== "connectPathway") select(null);
@@ -874,31 +891,6 @@ const BusinessNode = memo(({ data, selected }: NodeProps<BusinessFlowNode>) => (
       color: data.style.textColor,
     }}
   >
-    {data.finishAction && (
-      <NodeToolbar
-        isVisible
-        position={toolbarPositions[data.finishAction.position]}
-        offset={12}
-        className="pathway-finish-toolbar nodrag nopan nowheel"
-        role="group"
-        aria-label={`通路创建操作，靠近 ${data.finishAction.nodeName}`}
-        data-placement={data.finishAction.position}
-        onPointerDown={(event) => event.stopPropagation()}
-      >
-        <button
-          type="button"
-          className="primary-button"
-          aria-label="完成通路"
-          title="完成通路（Enter）"
-          onClick={(event) => {
-            event.stopPropagation();
-            data.finishAction?.onFinish();
-          }}
-        >
-          ✓ 完成通路
-        </button>
-      </NodeToolbar>
-    )}
     <Handle id="top" type="target" position={Position.Top} />
     <Handle id="left" type="target" position={Position.Left} />
     {data.step && (
@@ -1122,12 +1114,33 @@ function closestIndex(
   return result;
 }
 
+function edgeHandleIds(
+  source: DiagramNode | undefined,
+  target: DiagramNode | undefined,
+  nodes: LayoutBusinessNode[],
+  direction: "TB" | "LR",
+): Pick<CanvasEdge, "sourceHandle" | "targetHandle"> {
+  if (source && target && source.layerId === target.layerId) {
+    const sourceRect = nodes.find((node) => node.id === source.id);
+    const targetRect = nodes.find((node) => node.id === target.id);
+    if (sourceRect && targetRect) {
+      const deltaX = targetRect.x + targetRect.width / 2 -
+        (sourceRect.x + sourceRect.width / 2);
+      const deltaY = targetRect.y + targetRect.height / 2 -
+        (sourceRect.y + sourceRect.height / 2);
+      if (Math.abs(deltaX) >= Math.abs(deltaY))
+        return deltaX >= 0
+          ? { sourceHandle: "right", targetHandle: "left" }
+          : { sourceHandle: "left", targetHandle: "right" };
+      return deltaY >= 0
+        ? { sourceHandle: "bottom", targetHandle: "top" }
+        : { sourceHandle: "top", targetHandle: "bottom" };
+    }
+  }
+  return direction === "TB"
+    ? { sourceHandle: "bottom", targetHandle: "top" }
+    : { sourceHandle: "right", targetHandle: "left" };
+}
+
 const nodeTypes = { business: BusinessNode, layer: LayerNode };
 const edgeTypes = { parallel: ParallelEdge };
-
-const toolbarPositions: Record<NodeActionPosition, Position> = {
-  bottom: Position.Bottom,
-  right: Position.Right,
-  left: Position.Left,
-  top: Position.Top,
-};

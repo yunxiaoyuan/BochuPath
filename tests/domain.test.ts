@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { parseDiagram } from '../src/domain/schema';
 import { createBlankDiagram, createDemoDiagram } from '../src/domain/seed';
 import { validateDiagram } from '../src/domain/rules';
-import { orderedLeafLayers } from '../src/domain/layer-order';
-import { nodePathwayContext, pathwayCandidateNodes } from '../src/domain/selectors';
+import { orderedLeafLayers, sortPathwayNodeIds } from '../src/domain/layer-order';
+import { nodePathwayContext } from '../src/domain/selectors';
 
 describe('Diagram schema and invariants', () => {
   it('parses the V1 seed and rejects unknown versions', () => {
@@ -34,13 +34,18 @@ describe('Diagram schema and invariants', () => {
     ]);
     expect(validateDiagram(diagram)).toHaveLength(0);
   });
-  it('allows skipped layers and rejects same-layer or upward pathway steps', () => {
+  it('allows skipped layers and same-layer steps while rejecting reverse visual order', () => {
     const skipped = createDemoDiagram();
     skipped.pathways[0]!.steps.splice(1, 1);
     expect(validateDiagram(skipped).map((issue) => issue.code)).not.toContain('PATHWAY_LAYER_ORDER_INVALID');
 
     const sameLayer = createDemoDiagram();
     sameLayer.nodes[1]!.layerId = 'layer_demand';
+    sameLayer.nodes[1]!.order = 20;
+    expect(validateDiagram(sameLayer).map((issue) => issue.code)).not.toContain('PATHWAY_LAYER_ORDER_INVALID');
+
+    sameLayer.pathways[0]!.steps[0]!.nodeId = 'node_solution';
+    sameLayer.pathways[0]!.steps[1]!.nodeId = 'node_demand';
     expect(validateDiagram(sameLayer).map((issue) => issue.code)).toContain('PATHWAY_LAYER_ORDER_INVALID');
 
     const upward = createDemoDiagram();
@@ -48,11 +53,17 @@ describe('Diagram schema and invariants', () => {
     upward.pathways[0]!.steps[2]!.nodeId = 'node_demand';
     expect(validateDiagram(upward).map((issue) => issue.code)).toContain('PATHWAY_LAYER_ORDER_INVALID');
   });
-  it('filters insertion candidates by the neighboring layer interval', () => {
+  it('sorts selected pathway nodes by fixed layer and same-layer node order', () => {
     const diagram = createDemoDiagram();
-    expect(pathwayCandidateNodes(diagram, ['node_demand', 'node_delivery'], 1).map((node) => node.id)).toEqual(['node_solution']);
-    expect(pathwayCandidateNodes(diagram, ['node_solution'], 0).map((node) => node.id)).toEqual(['node_demand']);
-    expect(pathwayCandidateNodes(diagram, ['node_solution'], 1).map((node) => node.id)).toEqual(['node_delivery']);
+    diagram.nodes.push({
+      id: 'node_demand_alt', layerId: 'layer_demand', styleId: 'style_confirmed',
+      name: '需求补充', decompositionItems: [], order: 20,
+    });
+    expect(sortPathwayNodeIds(diagram, [
+      'node_delivery', 'node_demand_alt', 'node_solution', 'node_demand',
+    ])).toEqual([
+      'node_demand', 'node_demand_alt', 'node_solution', 'node_delivery',
+    ]);
   });
   it('builds a full visible pathway highlight while keeping hidden pathways separate', () => {
     const diagram = createDemoDiagram();
