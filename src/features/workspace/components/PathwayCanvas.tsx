@@ -260,9 +260,7 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           ? false
           : focusedIds.size
           ? !focusedIds.has(node.id)
-          : selectedNodeContext
-            ? !selectedNodeContext.relatedNodeIds.has(node.id)
-            : false;
+          : false;
       const participationCount = nodePathways(diagram, node.id).length;
       const siblingRects = layout.nodes.filter((item) => item.layerId === node.layerId);
       const canReorder = mode === "edit" && tool === "select" && siblingRects.length > 1;

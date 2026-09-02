@@ -206,22 +206,43 @@ test("fully connects two nodes in each occupied layer", async ({ page }) => {
   await expect(page.locator(".react-flow__edge-path")).toHaveCount(6);
 });
 
-test("highlights every visible pathway node and edge in edit and view modes", async ({
+test("highlights every visible pathway node and edge without dimming unrelated nodes", async ({
   page,
 }) => {
   await page.goto("/diagrams/diagram_demo/edit");
-  await page.getByRole("button", { name: /方案评审，位于 方案层/ }).click();
+  await page.getByTitle("新增节点").click();
+  await page.getByLabel("节点名称").fill("未关联节点");
+  await page.getByLabel("所属叶子层级").selectOption({ label: "需求层" });
+  await page.getByRole("button", { name: "确定" }).click();
+  const unrelatedNode = page.getByRole("button", { name: /未关联节点，位于 需求层/ });
+  const reviewNode = page
+    .getByRole("button", { name: /方案评审，位于 方案层/ })
+    .locator(".business-node");
+  await page.getByRole("button", { name: /需求确认，位于 需求层/ }).click();
 
-  await expect(page.locator(".business-node.related")).toHaveCount(2);
+  const relatedNodes = page.locator(".business-node.related");
+  await expect(relatedNodes).toHaveCount(2);
+  await expect(reviewNode).toHaveClass(/related/);
+  await expect(reviewNode).toHaveCSS("outline-style", "none");
+  await expect(reviewNode).toHaveCSS("border-style", "solid");
+  await expect(reviewNode).toHaveCSS("border-width", "2px");
+  expect(await reviewNode.evaluate((element) =>
+    getComputedStyle(element).boxShadow,
+  )).toContain("inset");
   await expect(page.locator(".react-flow__edge.related-edge")).toHaveCount(2);
-  await expect(page.getByText(/已高亮 1 条可见通路、3 个关联节点/)).toBeVisible();
+  await expect(unrelatedNode.locator(".business-node")).not.toHaveClass(/dimmed/);
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByText("✓ 已保存")).toBeVisible();
 
   await page.getByRole("button", { name: "查看", exact: true }).click();
   await expect(page.locator(".business-node.related")).toHaveCount(2);
   await expect(page.locator(".react-flow__edge.related-edge")).toHaveCount(2);
+  await expect(unrelatedNode.locator(".business-node")).not.toHaveClass(/dimmed/);
   await page.locator(".react-flow__pane").click({ position: { x: 12, y: 12 } });
   await expect(page.locator(".business-node.related")).toHaveCount(0);
   await expect(page.locator(".react-flow__edge.related-edge")).toHaveCount(0);
+  await expect(reviewNode).toHaveCSS("border-style", "dashed");
+  await expect(reviewNode).toHaveCSS("border-width", "1px");
 });
 
 test("edits same-layer and cross-layer pathway membership directly on the canvas", async ({
