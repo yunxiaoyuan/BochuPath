@@ -51,6 +51,14 @@ export class LocalStorageDiagramRepository implements DiagramRepository {
     try { this.storage.setItem(diagramKey(diagram.id), JSON.stringify(diagram)); this.writeIndex([...this.readIndex(), summary(diagram)]); return structuredClone(diagram); }
     catch { throw persistenceError('PERSISTENCE_FAILED'); }
   }
+  async importDiagram(source: Diagram): Promise<Diagram> {
+    const imported = importedDiagram(assertValid(structuredClone(source)));
+    try {
+      this.storage.setItem(diagramKey(imported.id), JSON.stringify(imported));
+      this.writeIndex([...this.readIndex(), summary(imported)]);
+      return structuredClone(imported);
+    } catch { throw persistenceError('PERSISTENCE_FAILED'); }
+  }
   async save(diagram: Diagram, expectedRevision: number): Promise<Diagram> {
     const valid = assertValid(structuredClone(diagram)); let stored: Diagram;
     try { stored = await this.get(valid.id); } catch { throw persistenceError('PERSISTENCE_FAILED'); }
@@ -81,4 +89,15 @@ export class LocalStorageDiagramRepository implements DiagramRepository {
   }
   async saveDraft(diagram: Diagram): Promise<void> { try { this.storage.setItem(draftKey(diagram.id), JSON.stringify({ diagram, savedAt: new Date().toISOString() } satisfies DraftRecord)); } catch { throw persistenceError('PERSISTENCE_FAILED'); } }
   async deleteDraft(id: string): Promise<void> { try { this.storage.removeItem(draftKey(id)); } catch { throw persistenceError('PERSISTENCE_FAILED'); } }
+}
+
+function importedDiagram(source: Diagram): Diagram {
+  const now = new Date().toISOString();
+  return {
+    ...structuredClone(source),
+    id: newId('diagram'),
+    revision: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
 }

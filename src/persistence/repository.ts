@@ -6,6 +6,7 @@ export interface DiagramRepository {
   list(): Promise<DiagramSummary[]>;
   get(id: string): Promise<Diagram>;
   create(input: NewDiagramInput): Promise<Diagram>;
+  importDiagram(diagram: Diagram): Promise<Diagram>;
   save(diagram: Diagram, expectedRevision: number): Promise<Diagram>;
   duplicate(id: string, name: string): Promise<Diagram>;
   delete(id: string): Promise<void>;

@@ -30,8 +30,9 @@ E2E 同时运行 `@axe-core/playwright` 的浅色/深色主题 WCAG 2 A/AA 自�
 
 - `src/domain`：V1.1 持久化类型、V1.0 显式迁移、Zod Schema、稳定错误码、叶子层级/同层节点固定顺序、不变量与种子数据。
 - `src/editor`：所有事实数据写入所经过的领域命令、100 步 Undo/Redo 与 Zustand 编辑状态。
-- `src/layout`：从 Pathway 节点集合派生分层有向 Edge，以及相同输入得到相同坐标的 TB/LR 泳道布局。
+- `src/layout`：从 Pathway 节点集合派生分层有向 Edge，以及相同输入得到相同坐标的 TB/LR 泳道布局；嵌套层级由内向外递归包围直属子层，并为相邻嵌套子树保留安全间距。
 - `src/persistence`：Repository 接口、localStorage Adapter 与 PageDrop 共享 JSON Adapter；所有正式保存使用 revision 乐观锁，个人草稿始终留在当前浏览器。
+- `src/persistence/exchange.ts`：Diagram JSON 的序列化、Schema/业务校验和安全文件名处理；导入通过 Repository 创建新图，不覆盖已有图。
 - `src/features`：图库、三栏工作台、统一 Selection、Inspector CRUD、查看查询和 React Flow 派生画布。
 
 画布的“布局”和“适应”以实际可见画布尺寸和布局边界计算缩放，不会把三栏工作台外框误当作可用区域；在 16:9 等宽屏中优先让同层节点保持单行，通过缩窄节点、按文字换行增高、压缩间距提高整图字号的屏幕可读性，只有单行缩放低于可读性下限时才自动换行。宽屏顶栏可随时收起对象面板或属性面板，为密集图释放更多空间。确认通路和新建草稿都显示方向箭头，不显示链式步骤序号。层级树、节点/通路列表、画布和 Inspector 共用同一个选择状态，并支持鼠标与键盘操作。
@@ -62,16 +63,22 @@ E2E 同时运行 `@axe-core/playwright` 的浅色/深色主题 WCAG 2 A/AA 自�
 
 返回图库或从编辑切换到查看时，未保存内容由应用内对话框拦截。沙箱无法可靠拦截用户关闭父页面，因此不把 `beforeunload` 原生弹窗作为数据保障，关闭/刷新后的恢复依赖个人草稿。
 
+## JSON 导入导出
+
+图库顶部的“导入 JSON”可读取由 BochuPath 导出的通路图文件。导入文件会先通过当前 Schema、迁移逻辑和引用完整性校验，成功后以新图加入图库并自动打开；原图不会被覆盖。工作台顶部的“导出”会导出完整 `Diagram` 事实数据，包含层级、节点、样式、通路和布局配置，不包含 React Flow 坐标或独立 Edge。
+
+普通浏览器可直接下载 `.json` 文件；PageDrop 沙箱不开放下载权限，导出弹窗会保留同样的 JSON 文本并提供复制按钮，可手动保存为 `.json` 文件。
+
 ## PageDrop 可运行副本
 
 生产构建可以将 `dist/` 打包为包含 `index.html` 的 zip 后上传到 PageDrop。Vite 只在本地构建，PageDrop 只运行静态文件。构建产物使用相对资源路径；应用在 PageDrop 页面中自动切换为 Hash 路由，并通过 PageDrop JSON SDK 或带 `credentials: "include"` 的同外链相对请求读写 `bochupath-data.json`。多人可在不同浏览器中异步编辑：保存时递增 Diagram revision，其他协作者刷新、重新打开或回到图库后读取最新版本；基于旧 revision 的保存会被拒绝，本地草稿不会丢失。
 
 PageDrop 的 JSON 覆盖写接口目前没有原子 compare-and-swap，因此这是异步协作而不是实时同屏协作。应避免两人同时在数秒内保存同一张图；更新 PageDrop 代码包时必须先下载线上 `bochupath-data.json`。Schema 不变时原样保留，Schema 升级时运行显式迁移并校验所有业务对象后再合包。本机开发通过 Vite 的同名 JSON 读写端点复现相同语义；嵌入环境限制浏览器存储时个人草稿降级到当前会话内存。
 
-线上 PageDrop iframe 权限为 `allow-scripts allow-same-origin allow-popups`。React、ES Module、DOM/SVG、React Flow、Pointer/Keyboard 事件、ResizeObserver 和 Hash 路由可用；沙箱没有 `allow-forms`、`allow-modals` 或 `allow-downloads`。因此所有表单都阻止原生导航并由 React 事件提交，确认和错误使用应用内组件，V1 不依赖 Blob 下载。应用不使用 Worker、Service Worker、父窗口 DOM、顶层跳转、全屏、Pointer Lock 或跨域接口。
+线上 PageDrop iframe 权限为 `allow-scripts allow-same-origin allow-popups`。React、ES Module、DOM/SVG、React Flow、Pointer/Keyboard 事件、ResizeObserver 和 Hash 路由可用；沙箱没有 `allow-forms`、`allow-modals` 或 `allow-downloads`。因此所有表单都阻止原生导航并由 React 事件提交，确认和错误使用应用内组件，PageDrop 导出使用 JSON 文本和复制操作。应用不使用 Worker、Service Worker、父窗口 DOM、顶层跳转、全屏、Pointer Lock 或跨域接口。
 
 Playwright 使用与线上相同的完整 sandbox 字符串回归图库/Inspector CRUD、跨层与同层多节点通路、画布直接编辑、编辑/查看关联高亮、共享保存、刷新重开、草稿恢复、版本冲突、应用内 Dialog、键盘、拖动、缩放和 200% 浏览器缩放，并检查页面控制台错误。真实已发布外链的写入测试需要单独配置 PageDrop API Token，本仓库测试不会修改线上外链。
 
 ## V1.0 边界
 
-不支持独立 NodeType、独立持久化或手工选择 Edge、条件边、环路、同一通路重复节点、自由坐标定位/锁定、手工折线、多人实时同屏协作、自动合并、评论和导入导出。同层多节点会通过相邻占用层全连接自动形成分支与汇聚，但不支持只保留其中部分边。画布拖动仅调整层级或节点的结构化 `order`；节点与连线仍是 `Diagram` 的确定性派生视图。
+不支持独立 NodeType、独立持久化或手工选择 Edge、条件边、环路、同一通路重复节点、自由坐标定位/锁定、手工折线、多人实时同屏协作、自动合并和评论。同层多节点会通过相邻占用层全连接自动形成分支与汇聚，但不支持只保留其中部分边。画布拖动仅调整层级或节点的结构化 `order`；节点与连线仍是 `Diagram` 的确定性派生视图。

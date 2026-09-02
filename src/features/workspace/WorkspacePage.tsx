@@ -10,6 +10,7 @@ import { nodePathwayContext } from "../../domain/selectors";
 import { ObjectPanel } from "./components/ObjectPanel";
 import { PathwayCanvas } from "./components/PathwayCanvas";
 import { Inspector } from "./components/Inspector";
+import { DiagramExportDialog } from "../diagrams/DiagramExportDialog";
 
 export type CreateKind =
   | "layer"
@@ -32,6 +33,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
   const [createKind, setCreateKind] = useState<CreateKind>(null);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
+  const [exportOpen, setExportOpen] = useState(false);
   const shared = usesSharedJsonRepository();
   useEffect(() => {
     const current = useEditorStore.getState();
@@ -242,6 +244,13 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
             </>
           )}
           <button
+            className="export-button"
+            onClick={() => setExportOpen(true)}
+            title="导出当前通路图 JSON"
+          >
+            导出
+          </button>
+          <button
             className="icon-button responsive-panel-button"
             onClick={() => setLeftOpen(!leftOpen)}
             aria-label="切换对象面板"
@@ -323,6 +332,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
       <div className="small-viewport-warning">
         当前窗口小于 960×640，建议增大窗口；仅保留查看能力。
       </div>
+      {exportOpen && <DiagramExportDialog diagram={diagram} onClose={() => setExportOpen(false)} />}
     </div>
   );
 }

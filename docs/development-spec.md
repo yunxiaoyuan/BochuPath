@@ -64,6 +64,7 @@ V1.0 必须形成以下完整闭环：
 | 画布 | 层级容器、节点、方向箭头、自动布局、缩放、平移、适应画布、框选、关联弱化/高亮 |
 | 查看模式 | 搜索、筛选、结构定位、节点详情、单节点全部可见关联通路高亮、单通路聚焦、选中多个节点后筛出包含这些节点的通路 |
 | 编辑保障 | 规则校验、依赖检查、撤销/重做、脏状态、手动保存、本地草稿、保存失败反馈 |
+| JSON 交换 | 导出完整 `Diagram` JSON；导入前执行 Schema/迁移/引用校验，并以新图加入图库，不覆盖已有图 |
 | 主题与可达性 | BOCHUI Lite 的 Light/Dark、键盘操作、可访问名称、对比度、200% 浏览器缩放可用 |
 | 工程质量 | 类型检查、单元测试、组件测试、关键 E2E、生产构建、README、种子数据 |
 
@@ -75,7 +76,7 @@ V1.0 必须形成以下完整闭环：
 - 不支持完全自由拖拽坐标、位置锁定和手工折线编辑；
 - 不支持多人实时协作、评论、组织权限、审批发布、历史版本差异；
 - 不支持模板市场、全局跨图样式库、开放 API；
-- 不要求 Excel/JSON 导入、图片/PDF 导出和分享链接；
+- 不要求 Excel 导入、图片/PDF 导出和分享链接；
 - 不要求移动端编辑和超大图增量布局。
 
 开发 Agent 不得“顺手”加入这些能力，以免破坏 V1 的模型边界。
@@ -360,6 +361,7 @@ PATHWAY_MIN_LAYERS
 PATHWAY_DUPLICATE_NODE
 PERSISTENCE_CONFLICT
 PERSISTENCE_FAILED
+IMPORT_INVALID
 ```
 
 UI 需要把错误码映射为中文、可执行的提示，并将焦点移动到第一个错误字段或全局 Message Bar。
@@ -394,7 +396,7 @@ function deriveEdges(diagram: Diagram, pathway: Pathway): RenderEdge[] {
 
 1. 校验并按 `order,id` 稳定排序层级树；
 2. 找出所有叶子层级，并按深度优先的视觉顺序展平；
-3. 每个叶子层级生成一个泳道带；父层级容器跨越其全部后代泳道；
+3. 每个叶子层级生成一个泳道带；父层级容器跨越其全部后代泳道，并必须由直属子层容器逐级向外包围，不能让连续父层复用同一个包围盒；相邻嵌套子树的间距须计入容器边框和标题区的外扩量；
 4. 节点按 `layerId` 分组，再按 `order,id` 稳定排序；
 5. 在泳道中根据 `nodeWidth/nodeMinHeight/nodeGap` 排列节点；节点高度由名称和拆解文本测量，但在同一行对齐；
    - 布局接收实际画布宽高作为派生输入，在 16:9 等宽屏和密集数据下枚举紧凑节点宽度、间距与行列容量；优先保持同层单行，通过缩窄节点和按文字换行增高保证内容可读，只有单行投影缩放低于可读性阈值时才允许自动换行；
@@ -655,11 +657,14 @@ interface DiagramRepository {
   list(): Promise<DiagramSummary[]>;
   get(id: DiagramId): Promise<Diagram>;
   create(input: NewDiagramInput): Promise<Diagram>;
+  importDiagram(diagram: Diagram): Promise<Diagram>;
   save(diagram: Diagram, expectedRevision: number): Promise<Diagram>;
   duplicate(id: DiagramId, name: string): Promise<Diagram>;
   delete(id: DiagramId): Promise<void>;
 }
 ```
+
+`importDiagram` 只接受已经通过 Schema 和领域规则校验的 `Diagram`，Repository 为其生成新的图 ID、时间戳和 `revision: 1` 后追加保存。导出使用工作台当前事实源，包含尚未保存的内存内容。
 
 UI 和 store 不得直接调用 localStorage 或 fetch，只调用 Repository。
 
@@ -685,9 +690,9 @@ bochupath:v1:draft:<diagramId>
 - 图库每次打开及窗口重新聚焦时读取最新共享文件；编辑页加载时读取最新 Diagram；
 - 手动保存携带加载时的 Diagram revision。共享版本已变化时返回 `PERSISTENCE_CONFLICT`，保留当前浏览器草稿，由用户刷新后人工合并；
 - 草稿继续使用 `bochupath:v1:draft:<diagramId>`，只属于当前浏览器，不共享；
-- 沙箱未开放 `allow-forms`、`allow-modals` 或 `allow-downloads`：所有表单必须 `preventDefault` 并由 React 事件提交；确认和错误使用应用内组件；V1 不依赖 Blob 下载；
+- 沙箱未开放 `allow-forms`、`allow-modals` 或 `allow-downloads`：所有表单必须 `preventDefault` 并由 React 事件提交；确认和错误使用应用内组件；PageDrop 导出使用应用内 JSON 文本和复制操作，不依赖 Blob 下载；普通浏览器可下载 JSON 文件；
 - 图库返回、编辑/查看模式切换等内部导航使用应用内脏状态拦截；不把 `beforeunload` 原生弹窗作为保障，关闭父页面时依靠 500ms 个人草稿和重新进入后的恢复提示；
-- 资源使用相对路径，路由使用 Hash 模式，正式读写通过 PageDrop JSON SDK或同外链相对 `fetch` 且带 `credentials: "include"`；不访问父窗口 DOM，不使用顶层跳转、全屏、Pointer Lock、Worker、Service Worker、下载或跨域接口；
+- 资源使用相对路径，路由使用 Hash 模式，正式读写通过 PageDrop JSON SDK或同外链相对 `fetch` 且带 `credentials: "include"`；不访问父窗口 DOM，不使用顶层跳转、全屏、Pointer Lock、Worker、Service Worker 或跨域接口；PageDrop 导出不依赖浏览器下载能力；
 - PageDrop 当前仅提供整文件覆盖写入，不提供原子 compare-and-swap，因此支持多人异步协作，不承诺实时同屏、自动合并或同一瞬间并发写入无冲突；
 - 更新 PageDrop 外链代码前必须先读取外链详情并保留线上全部 `.json`，尤其是 `bochupath-data.json`。
 
@@ -820,10 +825,11 @@ DELETE /api/bochupath-diagrams/:id
 - 编辑/查看模式单选节点可高亮其全部可见通路涉及的完整节点与箭头，隐藏通路不显示；
 - Undo/Redo 覆盖四类对象核心操作和复杂迁移/替换事务；
 - 手动保存、本地草稿、刷新恢复、失败提示和 revision 逻辑可用；
+- JSON 导入导出可用：非法文件不改变现有数据，合法文件作为新图加入，导出内容可重新导入并保持 Diagram 事实数据一致；
 - BOCHUI Light/Dark、尺寸、状态和响应式符合第 8 章；
 - 不依赖图片表达任何关键结构、操作或状态；
 - 键盘可完成选择、编辑、创建通路和保存；Axe 无 critical/serious；
-- PageDrop 等价 sandbox 回归通过，应用不依赖原生表单导航、浏览器模态框、下载、父窗口控制或运行时 Node 服务；
+- PageDrop 等价 sandbox 回归通过，应用不依赖原生表单导航、浏览器模态框、父窗口控制或运行时 Node 服务；PageDrop 导出不要求浏览器下载权限；
 - 1440×900 无页面级滚动，960×640 可查看，200% 缩放可提交；
 - 单元、组件、E2E、类型检查和生产构建全部通过；
 - README 包含安装、启动、测试、构建、数据模型、存储方式和已知限制；

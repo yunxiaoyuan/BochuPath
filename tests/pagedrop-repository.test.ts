@@ -96,6 +96,18 @@ describe("PageDrop shared repository", () => {
     expect((await alice.getDraft(created.id))?.diagram.name).toBe("Alice 本地草稿");
     expect(await bob.getDraft(created.id)).toBeNull();
   });
+
+  it("imports a Diagram as a new shared diagram", async () => {
+    const client = new FakeSharedJsonClient(initialState());
+    const repository = new PageDropDiagramRepository(client, new MemoryStorage());
+    const source = createDemoDiagram();
+
+    const imported = await repository.importDiagram(source);
+
+    expect(imported.id).not.toBe(source.id);
+    expect(imported.revision).toBe(1);
+    expect((await repository.list()).filter((item) => item.name === source.name)).toHaveLength(2);
+  });
 });
 
 describe("PageDrop runtime detection", () => {

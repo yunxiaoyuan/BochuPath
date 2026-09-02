@@ -171,6 +171,13 @@ export class PageDropDiagramRepository implements DiagramRepository {
     return structuredClone(diagram);
   }
 
+  async importDiagram(source: Diagram): Promise<Diagram> {
+    const state = await this.readState();
+    const imported = importedDiagram(assertValid(structuredClone(source)));
+    await this.commit(state, [...state.diagrams, imported]);
+    return structuredClone(imported);
+  }
+
   async save(diagram: Diagram, expectedRevision: number): Promise<Diagram> {
     const valid = assertValid(structuredClone(diagram));
     const state = await this.readState();
@@ -259,4 +266,15 @@ export class PageDropDiagramRepository implements DiagramRepository {
       throw persistenceError("PERSISTENCE_FAILED");
     }
   }
+}
+
+function importedDiagram(source: Diagram): Diagram {
+  const now = new Date().toISOString();
+  return {
+    ...structuredClone(source),
+    id: newId("diagram"),
+    revision: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
 }

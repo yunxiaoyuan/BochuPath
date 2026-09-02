@@ -74,4 +74,41 @@ describe('derived canvas', () => {
     expect(adaptive.nodes.every((node) => node.width < diagram.layout.nodeWidth)).toBe(true);
     expect(adaptive.nodes.every((node) => node.height > diagram.layout.nodeMinHeight)).toBe(true);
   });
+
+  it.each(['TB', 'LR'] as const)('keeps nested layer containers distinct in %s layout', (direction) => {
+    const diagram = createDemoDiagram();
+    diagram.layout = { ...diagram.layout, direction };
+    diagram.layers = [
+      { id: 'root-a', parentId: null, name: '根层 A', order: 10 },
+      { id: 'middle-a', parentId: 'root-a', name: '中层 A', order: 10 },
+      { id: 'leaf-a', parentId: 'middle-a', name: '叶层 A', order: 10 },
+      { id: 'root-b', parentId: null, name: '根层 B', order: 20 },
+      { id: 'middle-b', parentId: 'root-b', name: '中层 B', order: 10 },
+      { id: 'leaf-b', parentId: 'middle-b', name: '叶层 B', order: 10 },
+    ];
+    diagram.nodes = [
+      { id: 'node-a', layerId: 'leaf-a', styleId: 'style_confirmed', name: '节点 A', decompositionItems: [], order: 10 },
+      { id: 'node-b', layerId: 'leaf-b', styleId: 'style_confirmed', name: '节点 B', decompositionItems: [], order: 10 },
+    ];
+    diagram.pathways = [];
+
+    const layout = layoutDiagram(diagram, { width: 960, height: 640 });
+    const rect = (id: string) => layout.layers.find((layer) => layer.id === id)!;
+    const contains = (outer: typeof layout.bounds, inner: typeof layout.bounds) =>
+      outer.x <= inner.x && outer.y <= inner.y &&
+      outer.x + outer.width >= inner.x + inner.width &&
+      outer.y + outer.height >= inner.y + inner.height;
+    const overlaps = (left: typeof layout.bounds, right: typeof layout.bounds) =>
+      left.x < right.x + right.width && right.x < left.x + left.width &&
+      left.y < right.y + right.height && right.y < left.y + left.height;
+
+    expect(contains(rect('root-a'), rect('middle-a'))).toBe(true);
+    expect(contains(rect('middle-a'), rect('leaf-a'))).toBe(true);
+    expect(contains(rect('root-b'), rect('middle-b'))).toBe(true);
+    expect(contains(rect('middle-b'), rect('leaf-b'))).toBe(true);
+    expect(overlaps(rect('root-a'), rect('root-b'))).toBe(false);
+    expect(overlaps(rect('middle-a'), rect('middle-b'))).toBe(false);
+    expect(rect('root-a')).not.toEqual(rect('middle-a'));
+    expect(rect('middle-a')).not.toEqual(rect('leaf-a'));
+  });
 });
