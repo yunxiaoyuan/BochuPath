@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAppDialog } from "../../app/AppDialog";
-import { usesSharedJsonRepository } from "../../app/runtime";
+import { isPageDropRuntime, usesSharedJsonRepository } from "../../app/runtime";
 import { createPathway } from "../../editor/commands";
 import { useEditorStore } from "../../editor/store";
 import type { EditorMode } from "../../domain/types";
@@ -11,6 +11,7 @@ import { ObjectPanel } from "./components/ObjectPanel";
 import { PathwayCanvas } from "./components/PathwayCanvas";
 import { Inspector } from "./components/Inspector";
 import { DiagramExportDialog } from "../diagrams/DiagramExportDialog";
+import { saveDiagramFile } from "../../persistence/exchange";
 
 export type CreateKind =
   | "layer"
@@ -34,6 +35,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportMessage, setExportMessage] = useState("");
   const shared = usesSharedJsonRepository();
   useEffect(() => {
     const current = useEditorStore.getState();
@@ -245,7 +247,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
           )}
           <button
             className="export-button"
-            onClick={() => setExportOpen(true)}
+            onClick={() => void exportCurrentDiagram()}
             title="导出当前通路图 JSON"
           >
             导出
@@ -332,9 +334,25 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
       <div className="small-viewport-warning">
         当前窗口小于 960×640，建议增大窗口；仅保留查看能力。
       </div>
+      {exportMessage && <div className="export-toast" role="status">{exportMessage}</div>}
       {exportOpen && <DiagramExportDialog diagram={diagram} onClose={() => setExportOpen(false)} />}
     </div>
   );
+
+  async function exportCurrentDiagram() {
+    setExportMessage("");
+    if (isPageDropRuntime()) {
+      setExportOpen(true);
+      return;
+    }
+    try {
+      const result = await saveDiagramFile(diagram);
+      if (result === "saved") setExportMessage("文件已保存");
+      else if (result === "downloaded") setExportMessage("文件已开始下载");
+    } catch {
+      setExportMessage("导出失败，请稍后重试");
+    }
+  }
 }
 
 function saveText(state: string): string {

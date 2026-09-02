@@ -66,7 +66,7 @@ button:hover:not(:disabled) { background: var(--color-fill-level-1); border-colo
 .modal-card { width: min(420px, 100%); border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-bg-base); box-shadow: var(--shadow-float); padding: 20px; }
 .modal-card h2 { margin: 0; font-size: 18px; }.modal-card p { color: var(--color-text-2); font-size: 12px; line-height: 1.5; margin: 7px 0 18px; }.modal-card .field { margin-bottom: 20px; }.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .app-dialog-card { width: min(440px, 100%); }.modal-actions .danger-button { width: auto; }
-.exchange-modal-card { width: min(720px, 100%); }.export-json-field textarea { min-height: 280px; resize: vertical; font-family: Consolas, "Microsoft YaHei UI", monospace; font-size: 12px; line-height: 1.45; white-space: pre; overflow: auto; }.inline-success { color: var(--color-success); font-size: 12px; margin: -8px 0 16px; }
+.exchange-modal-card { width: min(720px, 100%); }.export-json-field textarea { min-height: 280px; resize: vertical; font-family: Consolas, "Microsoft YaHei UI", monospace; font-size: 12px; line-height: 1.45; white-space: pre; overflow: auto; }.inline-success { color: var(--color-success); font-size: 12px; margin: -8px 0 16px; }.export-toast { position: fixed; right: 16px; bottom: 40px; z-index: 90; max-width: min(360px, calc(100vw - 32px)); padding: 8px 12px; border: 1px solid var(--color-brand-2); border-radius: 6px; background: var(--color-brand-1); color: var(--color-brand-6); box-shadow: var(--shadow-float); font-size: 12px; }
 
 /* Workspace shell */
 .workspace-shell { height: 100%; display: grid; grid-template-rows: 48px auto minmax(0, 1fr) 28px; background: var(--color-bg-page); }

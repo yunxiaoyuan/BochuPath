@@ -48,7 +48,7 @@ function bochuPathLocalData(): Plugin {
         request.on('end', () => {
           try {
             const input = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
-            if (input.schemaVersion !== '1.0' || !Array.isArray(input.diagrams)) {
+            if ((input.schemaVersion !== '1.0' && input.schemaVersion !== '1.1') || !Array.isArray(input.diagrams)) {
               throw new Error('Invalid BochuPath shared state');
             }
             writeFileSync(runtimeFile, `${JSON.stringify(input, null, 2)}\n`, 'utf8');

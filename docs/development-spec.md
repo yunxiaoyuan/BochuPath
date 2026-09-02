@@ -690,7 +690,7 @@ bochupath:v1:draft:<diagramId>
 - 图库每次打开及窗口重新聚焦时读取最新共享文件；编辑页加载时读取最新 Diagram；
 - 手动保存携带加载时的 Diagram revision。共享版本已变化时返回 `PERSISTENCE_CONFLICT`，保留当前浏览器草稿，由用户刷新后人工合并；
 - 草稿继续使用 `bochupath:v1:draft:<diagramId>`，只属于当前浏览器，不共享；
-- 沙箱未开放 `allow-forms`、`allow-modals` 或 `allow-downloads`：所有表单必须 `preventDefault` 并由 React 事件提交；确认和错误使用应用内组件；PageDrop 导出使用应用内 JSON 文本和复制操作，不依赖 Blob 下载；普通浏览器可下载 JSON 文件；
+- 沙箱未开放 `allow-forms`、`allow-modals` 或 `allow-downloads`：所有表单必须 `preventDefault` 并由 React 事件提交；确认和错误使用应用内组件；PageDrop 导出使用应用内 JSON 文本和复制操作，不依赖 Blob 下载；普通浏览器优先打开系统保存文件对话框，不支持时退回下载 JSON 文件；
 - 图库返回、编辑/查看模式切换等内部导航使用应用内脏状态拦截；不把 `beforeunload` 原生弹窗作为保障，关闭父页面时依靠 500ms 个人草稿和重新进入后的恢复提示；
 - 资源使用相对路径，路由使用 Hash 模式，正式读写通过 PageDrop JSON SDK或同外链相对 `fetch` 且带 `credentials: "include"`；不访问父窗口 DOM，不使用顶层跳转、全屏、Pointer Lock、Worker、Service Worker 或跨域接口；PageDrop 导出不依赖浏览器下载能力；
 - PageDrop 当前仅提供整文件覆盖写入，不提供原子 compare-and-swap，因此支持多人异步协作，不承诺实时同屏、自动合并或同一瞬间并发写入无冲突；

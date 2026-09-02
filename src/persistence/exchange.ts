@@ -2,6 +2,16 @@ import { assertValid, DomainError, errorMessages } from "../domain/rules";
 import { parseDiagram } from "../domain/schema";
 import type { Diagram } from "../domain/types";
 
+type SaveFilePicker = (options: {
+  suggestedName: string;
+  types: Array<{ description: string; accept: Record<string, string[]> }>;
+}) => Promise<{
+  createWritable: () => Promise<{
+    write: (data: string) => Promise<void>;
+    close: () => Promise<void>;
+  }>;
+}>;
+
 /**
  * Export the Diagram itself rather than a render snapshot. This keeps the
  * exported file portable between the local and PageDrop repositories and
@@ -45,6 +55,43 @@ export function parseImportedJson(json: string): Diagram {
 export function safeDiagramFileName(name: string): string {
   const normalized = name.trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_");
   return (normalized || "未命名通路图").slice(0, 80);
+}
+
+export type DiagramFileSaveResult = "saved" | "downloaded" | "cancelled";
+
+/**
+ * Save through the native file picker when the browser exposes it. The
+ * download fallback keeps the export usable in browsers without the File
+ * System Access API.
+ */
+export async function saveDiagramFile(diagram: Diagram): Promise<DiagramFileSaveResult> {
+  const json = serializeDiagram(diagram);
+  const suggestedName = `${safeDiagramFileName(diagram.name)}.json`;
+  const picker = (window as Window & { showSaveFilePicker?: SaveFilePicker }).showSaveFilePicker;
+  if (picker) {
+    try {
+      const handle = await picker({
+        suggestedName,
+        types: [{ description: "BochuPath 通路图 JSON", accept: { "application/json": [".json"] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(json);
+      await writable.close();
+      return "saved";
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return "cancelled";
+      throw error;
+    }
+  }
+
+  const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = suggestedName;
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  return "downloaded";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

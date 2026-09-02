@@ -11,17 +11,34 @@ describe("gallery JSON exchange", () => {
     window.localStorage.clear();
   });
 
-  it("exports a diagram and imports the file as a new diagram", async () => {
+  it("saves a diagram without a preview and imports the file as a new diagram", async () => {
     const user = userEvent.setup();
     render(<MemoryRouter initialEntries={["/diagrams"]}><App /></MemoryRouter>);
 
     expect(await screen.findByRole("heading", { name: "通路图库" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "编辑 需求到交付示例" }));
     await waitFor(() => expect(screen.getByLabelText("通路图画布")).toBeInTheDocument());
+
+    let savedJson = "";
+    let closed = false;
+    Object.defineProperty(window, "showSaveFilePicker", {
+      configurable: true,
+      value: async (options: { suggestedName: string }) => {
+        expect(options.suggestedName).toBe("需求到交付示例.json");
+        return {
+          createWritable: async () => ({
+            write: async (data: string) => { savedJson = data; },
+            close: async () => { closed = true; },
+          }),
+        };
+      },
+    });
     await user.click(screen.getByRole("button", { name: "导出" }));
-    expect(screen.getByRole("dialog", { name: "导出通路图" })).toBeInTheDocument();
-    expect((screen.getByLabelText("JSON 数据") as HTMLTextAreaElement).value).toContain('"schemaVersion": "1.1"');
-    await user.click(screen.getByRole("button", { name: "关闭" }));
+    await waitFor(() => expect(screen.getByText("文件已保存")).toBeInTheDocument());
+    expect(screen.queryByRole("dialog", { name: "导出通路图" })).not.toBeInTheDocument();
+    expect(savedJson).toContain('"schemaVersion": "1.1"');
+    expect(closed).toBe(true);
+    delete (window as Window & { showSaveFilePicker?: unknown }).showSaveFilePicker;
 
     await user.click(screen.getByRole("button", { name: "返回通路图库" }));
     await waitFor(() => expect(screen.getByRole("heading", { name: "通路图库" })).toBeInTheDocument());
