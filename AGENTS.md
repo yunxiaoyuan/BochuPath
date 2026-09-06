@@ -8,6 +8,7 @@
 
 - `docs/development-spec.md`：V1.0 唯一实施与验收规格，开发时优先阅读。
 - `docs/product-design.md`：产品定位、对象模型、用户流程和产品设计背景。
+- `docs/access-permission-design.md`：V1.1 企业微信登录、读写角色、邀请/申请/直开流程及安全边界；开发权限功能时必须完整阅读。
 
 ## 文档访问方法
 
@@ -17,6 +18,7 @@
 - 当前已保存：
   - `docs/development-spec.md`
   - `docs/product-design.md`
+  - `docs/access-permission-design.md`
 - 不要假设已删除的附件仍然存在；需要设计规范时，以当前用户提供的新文件或开发规格中的视觉章节为准。
 
 ### Confluence 文档
