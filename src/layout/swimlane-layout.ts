@@ -17,17 +17,35 @@ interface Packing {
   capacity: number;
 }
 
-const OUTER = 32;
-const HEADER = 36;
-const LANE_PADDING = 20;
+interface PackedBusinessNode {
+  node: DiagramNode;
+  width: number;
+}
+
+interface LrColumnMetrics {
+  nodes: DiagramNode[];
+  nodeWidths: number[];
+  nodeHeights: number[];
+  width: number;
+  height: number;
+}
+
+export const ADAPTIVE_LAYOUT_PADDING = 12;
+
+const OUTER = ADAPTIVE_LAYOUT_PADDING;
+const HEADER = 24;
+const LANE_PADDING = 4;
 const COMPACT_NODE_WIDTH = 104;
-const COMPACT_NODE_GAP = 8;
-const COMPACT_LAYER_GAP = 16;
+const COMPACT_NODE_MIN_WIDTH = 64;
+const COMPACT_NODE_MIN_HEIGHT = 32;
+const COMFORTABLE_NODE_MAX_WIDTH = 240;
+const COMPACT_NODE_GAP = 4;
+const COMPACT_LAYER_GAP = 4;
 const ROW_PREFERENCE_WEIGHT = 0.28;
 const MIN_SINGLE_AXIS_SCALE = 0.78;
-const LAYER_HORIZONTAL_PADDING = 12;
-const LAYER_BOTTOM_PADDING = 12;
-const MIN_NESTED_LAYER_GAP = 8;
+const LAYER_HORIZONTAL_PADDING = 4;
+const LAYER_BOTTOM_PADDING = 4;
+const MIN_NESTED_LAYER_GAP = 4;
 
 export function layoutDiagram(diagram: Diagram, viewport?: LayoutViewport): DiagramLayout {
   try { return calculate(diagram, validViewport(viewport)); } catch { return fallback(diagram); }
@@ -75,37 +93,52 @@ function layoutTopToBottom(
   viewport?: LayoutViewport,
 ): void {
   const packing = chooseTbPacking(diagram, leaves, nodesByLeaf, viewport);
+  const adaptive = Boolean(viewport);
   const maxCount = Math.max(1, ...leaves.map((leaf) => nodesByLeaf.get(leaf.id)?.length ?? 0));
   const usedColumns = Math.min(maxCount, packing.capacity);
   const gaps = nestedLayerGaps(diagram, leaves, packing.layerGap, 'TB');
-  const minimumLaneWidth = viewport ? Math.min(720, Math.max(420, viewport.width - OUTER * 2)) : 720;
-  const laneWidth = Math.max(
-    minimumLaneWidth,
-    LANE_PADDING * 2 + usedColumns * packing.nodeWidth + Math.max(0, usedColumns - 1) * packing.nodeGap,
-  );
+  const configuredLaneWidth = LANE_PADDING * 2
+    + usedColumns * packing.nodeWidth
+    + Math.max(0, usedColumns - 1) * packing.nodeGap;
+  const contentLaneWidth = adaptive
+    ? preferredTbLaneWidth(diagram, leaves, nodesByLeaf, packing)
+    : configuredLaneWidth;
+  const laneWidth = viewport
+    ? Math.max(420, Math.min(Math.max(420, viewport.width - OUTER * 2), contentLaneWidth))
+    : Math.max(720, contentLaneWidth);
   let cursor = OUTER;
 
   leaves.forEach((leaf, index) => {
     const nodes = nodesByLeaf.get(leaf.id) ?? [];
-    const rows = chunk(nodes, packing.capacity);
+    const rows = packTbRows(diagram, nodes, packing, laneWidth, adaptive);
     const rowHeights = rows.length
-      ? rows.map((row) => Math.max(diagram.layout.nodeMinHeight, ...row.map((node) => nodeHeight(diagram, node, packing.nodeWidth))))
-      : [diagram.layout.nodeMinHeight];
+      ? rows.map((row) => Math.max(
+          adaptiveNodeMinHeight(diagram, adaptive),
+          ...row.map((item) => nodeHeight(diagram, item.node, item.width, adaptive)),
+        ))
+      : [adaptiveNodeMinHeight(diagram, adaptive)];
     const contentHeight = rowHeights.reduce((total, height) => total + height, 0) + Math.max(0, rowHeights.length - 1) * packing.nodeGap;
     const rect = { x: OUTER, y: cursor, width: laneWidth, height: HEADER + LANE_PADDING * 2 + contentHeight };
     leafRects.set(leaf.id, rect);
 
     let rowY = rect.y + HEADER + LANE_PADDING;
     rows.forEach((row, rowIndex) => {
-      row.forEach((node, columnIndex) => nodeRects.push({
-        id: node.id,
-        kind: 'node',
-        layerId: leaf.id,
-        x: rect.x + LANE_PADDING + columnIndex * (packing.nodeWidth + packing.nodeGap),
-        y: rowY,
-        width: packing.nodeWidth,
-        height: rowHeights[rowIndex]!,
-      }));
+      const rowWidth = row.reduce((total, item) => total + item.width, 0)
+        + Math.max(0, row.length - 1) * packing.nodeGap;
+      const rowX = rect.x + (rect.width - rowWidth) / 2;
+      let nodeX = rowX;
+      row.forEach((item) => {
+        nodeRects.push({
+          id: item.node.id,
+          kind: 'node',
+          layerId: leaf.id,
+          x: nodeX,
+          y: rowY,
+          width: item.width,
+          height: nodeHeight(diagram, item.node, item.width, adaptive),
+        });
+        nodeX += item.width + packing.nodeGap;
+      });
       rowY += rowHeights[rowIndex]! + packing.nodeGap;
     });
     cursor += rect.height + (gaps[index] ?? packing.layerGap);
@@ -121,38 +154,48 @@ function layoutLeftToRight(
   viewport?: LayoutViewport,
 ): void {
   const packing = chooseLrPacking(diagram, leaves, nodesByLeaf, viewport);
-  const maximumNodeHeight = Math.max(
-    diagram.layout.nodeMinHeight,
-    ...diagram.nodes.map((node) => nodeHeight(diagram, node, packing.nodeWidth)),
-  );
-  const maxCount = Math.max(1, ...leaves.map((leaf) => nodesByLeaf.get(leaf.id)?.length ?? 0));
-  const usedRows = Math.min(maxCount, packing.capacity);
+  const adaptive = Boolean(viewport);
   const gaps = nestedLayerGaps(diagram, leaves, packing.layerGap, 'LR');
-  const minimumLaneHeight = viewport ? Math.min(420, Math.max(320, viewport.height - OUTER * 2)) : 420;
-  const laneHeight = Math.max(
-    minimumLaneHeight,
-    LANE_PADDING * 2 + usedRows * maximumNodeHeight + Math.max(0, usedRows - 1) * packing.nodeGap,
+  const maximumColumnHeight = Math.max(
+    adaptiveNodeMinHeight(diagram, adaptive),
+    ...leaves.flatMap((leaf) => chunk(nodesByLeaf.get(leaf.id) ?? [], packing.capacity)
+      .map((column) => lrColumnMetrics(diagram, column, packing, adaptive).height)),
   );
+  const contentLaneHeight = LANE_PADDING * 2 + maximumColumnHeight;
+  const laneHeight = viewport
+    ? Math.max(320, Math.min(Math.max(320, viewport.height - OUTER * 2), contentLaneHeight))
+    : Math.max(420, contentLaneHeight);
   let cursor = OUTER;
 
   leaves.forEach((leaf, index) => {
     const nodes = nodesByLeaf.get(leaf.id) ?? [];
-    const columnCount = Math.max(1, Math.ceil(nodes.length / packing.capacity));
-    const width = HEADER + LANE_PADDING * 2 + columnCount * packing.nodeWidth + Math.max(0, columnCount - 1) * packing.nodeGap;
+    const columns = chunk(nodes, packing.capacity)
+      .map((column) => lrColumnMetrics(diagram, column, packing, adaptive));
+    const contentWidth = columns.length
+      ? columns.reduce((total, column) => total + column.width, 0)
+        + Math.max(0, columns.length - 1) * packing.nodeGap
+      : adaptive ? COMPACT_NODE_MIN_WIDTH : packing.nodeWidth;
+    const width = HEADER + LANE_PADDING * 2 + contentWidth;
     const rect = { x: cursor, y: OUTER, width, height: laneHeight };
     leafRects.set(leaf.id, rect);
-    nodes.forEach((node, index) => {
-      const column = Math.floor(index / packing.capacity);
-      const row = index % packing.capacity;
-      nodeRects.push({
-        id: node.id,
-        kind: 'node',
-        layerId: leaf.id,
-        x: rect.x + HEADER + LANE_PADDING + column * (packing.nodeWidth + packing.nodeGap),
-        y: rect.y + LANE_PADDING + row * (maximumNodeHeight + packing.nodeGap),
-        width: packing.nodeWidth,
-        height: maximumNodeHeight,
+    let columnX = rect.x + HEADER + LANE_PADDING;
+    columns.forEach((column) => {
+      let nodeY = rect.y + (rect.height - column.height) / 2;
+      column.nodes.forEach((node, nodeIndex) => {
+        const nodeWidth = column.nodeWidths[nodeIndex]!;
+        const height = column.nodeHeights[nodeIndex]!;
+        nodeRects.push({
+          id: node.id,
+          kind: 'node',
+          layerId: leaf.id,
+          x: columnX + (column.width - nodeWidth) / 2,
+          y: nodeY,
+          width: nodeWidth,
+          height,
+        });
+        nodeY += height + packing.nodeGap;
       });
+      columnX += column.width + packing.nodeGap;
     });
     cursor += rect.width + (gaps[index] ?? packing.layerGap);
   });
@@ -168,29 +211,25 @@ function chooseTbPacking(
   if (!viewport) return { nodeWidth: diagram.layout.nodeWidth, nodeGap: diagram.layout.nodeGap, layerGap: diagram.layout.layerGap, capacity: maxCount };
   let best: Packing | undefined;
   let bestScore = -1;
-  let bestSingleAxis: Packing | undefined;
-  let bestSingleAxisScale = -1;
-  for (const nodeWidth of densityValues(diagram.layout.nodeWidth, COMPACT_NODE_WIDTH)) {
+  let bestHeight = Number.POSITIVE_INFINITY;
+  for (const nodeWidth of nodeWidthValues(diagram.layout.nodeWidth)) {
     for (const nodeGap of densityValues(diagram.layout.nodeGap, COMPACT_NODE_GAP)) {
       for (const layerGap of densityValues(diagram.layout.layerGap, COMPACT_LAYER_GAP)) {
-        for (let capacity = maxCount; capacity >= 1; capacity -= 1) {
-          const packing = { nodeWidth, nodeGap, layerGap, capacity };
-          const dimensions = measureTb(diagram, leaves, nodesByLeaf, packing, viewport);
-          const scale = projectedScale(dimensions, viewport);
-          if (capacity === maxCount && scale > bestSingleAxisScale + 0.001) {
-            bestSingleAxis = packing;
-            bestSingleAxisScale = scale;
-          }
-          const rowPreference = capacity / maxCount;
-          const score = scale * (1 - ROW_PREFERENCE_WEIGHT + ROW_PREFERENCE_WEIGHT * rowPreference);
-          if (score > bestScore + 0.001) { best = packing; bestScore = score; }
+        const packing = { nodeWidth, nodeGap, layerGap, capacity: maxCount };
+        const dimensions = measureTb(diagram, leaves, nodesByLeaf, packing, viewport);
+        const score = projectedScale(dimensions, viewport);
+        if (
+          score > bestScore + 0.001 ||
+          (Math.abs(score - bestScore) <= 0.001 && dimensions.height < bestHeight - 0.5)
+        ) {
+          best = packing;
+          bestScore = score;
+          bestHeight = dimensions.height;
         }
       }
     }
   }
-  return bestSingleAxis && bestSingleAxisScale >= MIN_SINGLE_AXIS_SCALE
-    ? bestSingleAxis
-    : best!;
+  return best!;
 }
 
 function chooseLrPacking(
@@ -203,22 +242,35 @@ function chooseLrPacking(
   if (!viewport) return { nodeWidth: diagram.layout.nodeWidth, nodeGap: diagram.layout.nodeGap, layerGap: diagram.layout.layerGap, capacity: maxCount };
   let best: Packing | undefined;
   let bestScore = -1;
+  let bestWidth = Number.POSITIVE_INFINITY;
   let bestSingleAxis: Packing | undefined;
   let bestSingleAxisScale = -1;
-  for (const nodeWidth of densityValues(diagram.layout.nodeWidth, COMPACT_NODE_WIDTH)) {
+  let bestSingleAxisWidth = Number.POSITIVE_INFINITY;
+  for (const nodeWidth of nodeWidthValues(diagram.layout.nodeWidth)) {
     for (const nodeGap of densityValues(diagram.layout.nodeGap, COMPACT_NODE_GAP)) {
       for (const layerGap of densityValues(diagram.layout.layerGap, COMPACT_LAYER_GAP)) {
-        for (let capacity = maxCount; capacity >= 1; capacity -= 1) {
+        for (const capacity of capacityValues(maxCount)) {
           const packing = { nodeWidth, nodeGap, layerGap, capacity };
           const dimensions = measureLr(diagram, leaves, nodesByLeaf, packing, viewport);
           const scale = projectedScale(dimensions, viewport);
-          if (capacity === maxCount && scale > bestSingleAxisScale + 0.001) {
+          if (capacity === maxCount && (
+            scale > bestSingleAxisScale + 0.001 ||
+            (Math.abs(scale - bestSingleAxisScale) <= 0.001 && dimensions.width < bestSingleAxisWidth - 0.5)
+          )) {
             bestSingleAxis = packing;
             bestSingleAxisScale = scale;
+            bestSingleAxisWidth = dimensions.width;
           }
           const columnPreference = capacity / maxCount;
           const score = scale * (1 - ROW_PREFERENCE_WEIGHT + ROW_PREFERENCE_WEIGHT * columnPreference);
-          if (score > bestScore + 0.001) { best = packing; bestScore = score; }
+          if (
+            score > bestScore + 0.001 ||
+            (Math.abs(score - bestScore) <= 0.001 && dimensions.width < bestWidth - 0.5)
+          ) {
+            best = packing;
+            bestScore = score;
+            bestWidth = dimensions.width;
+          }
         }
       }
     }
@@ -235,18 +287,23 @@ function measureTb(
   packing: Packing,
   viewport: LayoutViewport,
 ): { width: number; height: number } {
-  const maxCount = Math.max(1, ...leaves.map((leaf) => nodesByLeaf.get(leaf.id)?.length ?? 0));
-  const usedColumns = Math.min(maxCount, packing.capacity);
+  const adaptive = true;
   const gaps = nestedLayerGaps(diagram, leaves, packing.layerGap, 'TB');
   const laneWidth = Math.max(
-    Math.min(720, Math.max(420, viewport.width - OUTER * 2)),
-    LANE_PADDING * 2 + usedColumns * packing.nodeWidth + Math.max(0, usedColumns - 1) * packing.nodeGap,
+    420,
+    Math.min(
+      Math.max(420, viewport.width - OUTER * 2),
+      preferredTbLaneWidth(diagram, leaves, nodesByLeaf, packing),
+    ),
   );
   const laneHeights = leaves.map((leaf) => {
-    const rows = chunk(nodesByLeaf.get(leaf.id) ?? [], packing.capacity);
+    const rows = packTbRows(diagram, nodesByLeaf.get(leaf.id) ?? [], packing, laneWidth, adaptive);
     const rowHeights = rows.length
-      ? rows.map((row) => Math.max(diagram.layout.nodeMinHeight, ...row.map((node) => nodeHeight(diagram, node, packing.nodeWidth))))
-      : [diagram.layout.nodeMinHeight];
+      ? rows.map((row) => Math.max(
+          adaptiveNodeMinHeight(diagram, adaptive),
+          ...row.map((item) => nodeHeight(diagram, item.node, item.width, adaptive)),
+        ))
+      : [adaptiveNodeMinHeight(diagram, adaptive)];
     return HEADER + LANE_PADDING * 2 + rowHeights.reduce((total, height) => total + height, 0) + Math.max(0, rowHeights.length - 1) * packing.nodeGap;
   });
   return {
@@ -262,21 +319,28 @@ function measureLr(
   packing: Packing,
   viewport: LayoutViewport,
 ): { width: number; height: number } {
-  const maxCount = Math.max(1, ...leaves.map((leaf) => nodesByLeaf.get(leaf.id)?.length ?? 0));
-  const maximumNodeHeight = Math.max(
-    diagram.layout.nodeMinHeight,
-    ...diagram.nodes.map((node) => nodeHeight(diagram, node, packing.nodeWidth)),
+  const adaptive = true;
+  const maximumColumnHeight = Math.max(
+    adaptiveNodeMinHeight(diagram, adaptive),
+    ...leaves.flatMap((leaf) => chunk(nodesByLeaf.get(leaf.id) ?? [], packing.capacity)
+      .map((column) => lrColumnMetrics(diagram, column, packing, adaptive).height)),
   );
-  const usedRows = Math.min(maxCount, packing.capacity);
   const gaps = nestedLayerGaps(diagram, leaves, packing.layerGap, 'LR');
   const laneHeight = Math.max(
-    Math.min(420, Math.max(320, viewport.height - OUTER * 2)),
-    LANE_PADDING * 2 + usedRows * maximumNodeHeight + Math.max(0, usedRows - 1) * packing.nodeGap,
+    320,
+    Math.min(
+      Math.max(320, viewport.height - OUTER * 2),
+      LANE_PADDING * 2 + maximumColumnHeight,
+    ),
   );
   const widths = leaves.map((leaf) => {
-    const count = nodesByLeaf.get(leaf.id)?.length ?? 0;
-    const columns = Math.max(1, Math.ceil(count / packing.capacity));
-    return HEADER + LANE_PADDING * 2 + columns * packing.nodeWidth + Math.max(0, columns - 1) * packing.nodeGap;
+    const columns = chunk(nodesByLeaf.get(leaf.id) ?? [], packing.capacity)
+      .map((column) => lrColumnMetrics(diagram, column, packing, adaptive));
+    const contentWidth = columns.length
+      ? columns.reduce((total, column) => total + column.width, 0)
+        + Math.max(0, columns.length - 1) * packing.nodeGap
+      : COMPACT_NODE_MIN_WIDTH;
+    return HEADER + LANE_PADDING * 2 + contentWidth;
   });
   return {
     width: widths.reduce((total, width) => total + width, OUTER * 2) + gaps.reduce((total, gap) => total + gap, 0),
@@ -284,25 +348,171 @@ function measureLr(
   };
 }
 
-function nodeHeight(diagram: Diagram, node: DiagramNode, nodeWidth: number): number {
-  const contentWidth = Math.max(48, nodeWidth - 28);
-  const titleLine = Math.ceil(diagram.layout.fontSize * 1.45);
+function nodeHeight(
+  diagram: Diagram,
+  node: DiagramNode,
+  nodeWidth: number,
+  adaptive = false,
+): number {
+  const contentWidth = Math.max(32, nodeWidth - 16);
+  const configuredTitleLines = wrappedLineCount(
+    node.name,
+    diagram.layout.fontSize,
+    contentWidth,
+  );
+  const compactTitle = configuredTitleLines > 1;
+  const titleFontSize = compactTitle
+    ? Math.max(11, diagram.layout.fontSize - 1)
+    : diagram.layout.fontSize;
+  const titleLine = Math.ceil(titleFontSize * (compactTitle ? 1.15 : 1.35));
   const detailLine = Math.ceil(diagram.layout.descriptionFontSize * 1.4);
-  const titleLines = wrappedLineCount(node.name, diagram.layout.fontSize, contentWidth);
+  const titleLines = wrappedLineCount(node.name, titleFontSize, contentWidth);
   const detailLines = node.decompositionItems.reduce(
-    (total, item) => total + wrappedLineCount(item, diagram.layout.descriptionFontSize, Math.max(32, contentWidth - 16)),
+    (total, item) => total + wrappedLineCount(item, diagram.layout.descriptionFontSize, Math.max(24, contentWidth - 16)),
     0,
   );
-  const details = detailLines ? 5 + detailLines * detailLine : 0;
-  return Math.max(diagram.layout.nodeMinHeight, 24 + titleLines * titleLine + details);
+  const details = detailLines ? 4 + detailLines * detailLine : 0;
+  return Math.max(
+    adaptiveNodeMinHeight(diagram, adaptive),
+    roundToGrid(8 + titleLines * titleLine + details),
+  );
+}
+
+function adaptiveNodeMinHeight(diagram: Diagram, adaptive: boolean): number {
+  return adaptive
+    ? Math.min(diagram.layout.nodeMinHeight, COMPACT_NODE_MIN_HEIGHT)
+    : diagram.layout.nodeMinHeight;
+}
+
+function contentDrivenNodeWidth(
+  diagram: Diagram,
+  node: DiagramNode,
+  maximumWidth: number,
+  adaptive: boolean,
+): number {
+  if (!adaptive) return maximumWidth;
+  const titleWidth = estimatedTextWidth(node.name, diagram.layout.fontSize);
+  const detailWidth = Math.max(
+    0,
+    ...node.decompositionItems.map((item) => estimatedTextWidth(item, diagram.layout.descriptionFontSize) + 12),
+  );
+  const naturalWidth = roundToGrid(Math.max(titleWidth, detailWidth) + 16);
+  return Math.max(
+    COMPACT_NODE_MIN_WIDTH,
+    Math.min(Math.max(COMPACT_NODE_MIN_WIDTH, maximumWidth), naturalWidth),
+  );
+}
+
+function packTbRows(
+  diagram: Diagram,
+  nodes: DiagramNode[],
+  packing: Packing,
+  laneWidth: number,
+  adaptive: boolean,
+): PackedBusinessNode[][] {
+  const availableWidth = Math.max(COMPACT_NODE_MIN_WIDTH, laneWidth - LANE_PADDING * 2);
+  const maximumItemsPerRow = Math.max(
+    1,
+    Math.min(
+      packing.capacity,
+      Math.floor((availableWidth + packing.nodeGap) / (COMPACT_NODE_MIN_WIDTH + packing.nodeGap)),
+    ),
+  );
+  return chunk(nodes, maximumItemsPerRow).map((row) => {
+    const naturalWidths = row.map((node) => contentDrivenNodeWidth(diagram, node, packing.nodeWidth, adaptive));
+    const availableForNodes = availableWidth - Math.max(0, row.length - 1) * packing.nodeGap;
+    const naturalTotal = naturalWidths.reduce((total, width) => total + width, 0);
+    if (naturalTotal <= availableForNodes || row.length === 1) {
+      return row.map((node, index) => ({ node, width: naturalWidths[index]! }));
+    }
+
+    const minimumTotal = COMPACT_NODE_MIN_WIDTH * row.length;
+    const flexibleTotal = Math.max(1, naturalTotal - minimumTotal);
+    const flexibleBudget = Math.max(0, availableForNodes - minimumTotal);
+    return row.map((node, index) => ({
+      node,
+      width: COMPACT_NODE_MIN_WIDTH + floorToGrid(
+        (naturalWidths[index]! - COMPACT_NODE_MIN_WIDTH) * flexibleBudget / flexibleTotal,
+      ),
+    }));
+  });
+}
+
+function preferredTbLaneWidth(
+  diagram: Diagram,
+  leaves: Layer[],
+  nodesByLeaf: Map<string, DiagramNode[]>,
+  packing: Packing,
+): number {
+  const widestContent = Math.max(
+    COMPACT_NODE_MIN_WIDTH,
+    ...leaves.map((leaf) => {
+      const nodes = nodesByLeaf.get(leaf.id) ?? [];
+      return nodes.reduce(
+        (total, node) => total + contentDrivenNodeWidth(diagram, node, packing.nodeWidth, true),
+        0,
+      ) + Math.max(0, nodes.length - 1) * packing.nodeGap;
+    }),
+  );
+  return LANE_PADDING * 2 + widestContent;
+}
+
+function lrColumnMetrics(
+  diagram: Diagram,
+  nodes: DiagramNode[],
+  packing: Packing,
+  adaptive: boolean,
+): LrColumnMetrics {
+  const nodeWidths = nodes.map((node) => contentDrivenNodeWidth(diagram, node, packing.nodeWidth, adaptive));
+  const nodeHeights = nodes.map((node, index) => nodeHeight(diagram, node, nodeWidths[index]!, adaptive));
+  return {
+    nodes,
+    nodeWidths,
+    nodeHeights,
+    width: nodes.length ? Math.max(...nodeWidths) : adaptive ? COMPACT_NODE_MIN_WIDTH : packing.nodeWidth,
+    height: nodes.length
+      ? nodeHeights.reduce((total, height) => total + height, 0) + Math.max(0, nodes.length - 1) * packing.nodeGap
+      : adaptiveNodeMinHeight(diagram, adaptive),
+  };
 }
 
 function wrappedLineCount(text: string, fontSize: number, width: number): number {
-  const textWidth = [...text].reduce(
+  return Math.max(1, Math.ceil(estimatedTextWidth(text, fontSize) / Math.max(1, width)));
+}
+
+function estimatedTextWidth(text: string, fontSize: number): number {
+  return [...text].reduce(
     (total, character) => total + fontSize * (/^[\u0000-\u00ff]$/.test(character) ? 0.58 : 1),
     0,
   );
-  return Math.max(1, Math.ceil(textWidth / Math.max(1, width)));
+}
+
+function roundToGrid(value: number): number {
+  return Math.ceil(value / 4) * 4;
+}
+
+function floorToGrid(value: number): number {
+  return Math.floor(value / 4) * 4;
+}
+
+function nodeWidthValues(configured: number): number[] {
+  const comfortable = Math.max(
+    configured,
+    Math.min(COMFORTABLE_NODE_MAX_WIDTH, Math.round(configured * 1.35)),
+  );
+  return [...new Set([
+    comfortable,
+    configured,
+    Math.min(configured, Math.max(COMPACT_NODE_WIDTH, Math.round(configured * 0.88))),
+    Math.min(configured, COMPACT_NODE_WIDTH),
+  ])];
+}
+
+function capacityValues(maximum: number): number[] {
+  if (maximum <= 48) {
+    return Array.from({ length: maximum }, (_, index) => maximum - index);
+  }
+  return [maximum, ...Array.from({ length: 48 }, (_, index) => 48 - index)];
 }
 
 function densityValues(configured: number, compact: number): number[] {
@@ -310,7 +520,8 @@ function densityValues(configured: number, compact: number): number[] {
 }
 
 function projectedScale(bounds: { width: number; height: number }, viewport: LayoutViewport): number {
-  return Math.min(1, Math.max(1, viewport.width - 64) / Math.max(1, bounds.width), Math.max(1, viewport.height - 64) / Math.max(1, bounds.height));
+  const padding = ADAPTIVE_LAYOUT_PADDING * 2;
+  return Math.min(1, Math.max(1, viewport.width - padding) / Math.max(1, bounds.width), Math.max(1, viewport.height - padding) / Math.max(1, bounds.height));
 }
 
 function validViewport(viewport?: LayoutViewport): LayoutViewport | undefined {

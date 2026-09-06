@@ -34,6 +34,6 @@ export function deriveEdges(diagram: Diagram): RenderEdge[] {
   base.forEach((edge) => { const key = `${edge.sourceNodeId}::${edge.targetNodeId}`; groups.set(key, [...(groups.get(key) ?? []), edge]); });
   return base.map((edge) => {
     const group = groups.get(`${edge.sourceNodeId}::${edge.targetNodeId}`) ?? [edge]; const index = group.findIndex((x) => x.id === edge.id);
-    return { ...edge, parallelOffset: (index - (group.length - 1) / 2) * 8 };
+    return { ...edge, parallelOffset: (index - (group.length - 1) / 2) * 6 };
   });
 }

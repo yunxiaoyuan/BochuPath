@@ -184,16 +184,33 @@ test("PageDrop sandbox edits downward pathways and highlights complete node cont
 
   const demand = app.locator('.react-flow__node-business[data-id="node_demand"]');
   const demandAlt = app.locator('.react-flow__node-business[data-id="node_demand_alt"]');
+  await Promise.all([demand, demandAlt].map((locator) => locator.evaluate(async (element) => {
+    await Promise.all(element.getAnimations({ subtree: true }).map((animation) =>
+      animation.finished.catch(() => undefined),
+    ));
+  })));
   const demandBox = await demand.boundingBox();
   const demandAltBox = await demandAlt.boundingBox();
+  const iframeBox = await page.locator('iframe[title="PageDrop pathways"]').boundingBox();
   expect(demandBox).not.toBeNull();
   expect(demandAltBox).not.toBeNull();
+  expect(iframeBox).not.toBeNull();
+  await expect.poll(() => demandAlt.evaluate((element, point) =>
+    element.ownerDocument.elementFromPoint(point.x, point.y)
+      ?.closest('.react-flow__node')?.getAttribute('data-id') ?? null,
+  {
+    x: demandAltBox!.x + demandAltBox!.width / 2 - iframeBox!.x,
+    y: demandAltBox!.y + demandAltBox!.height / 2 - iframeBox!.y,
+  })).toBe('node_demand_alt');
   await page.mouse.move(
     demandAltBox!.x + demandAltBox!.width / 2,
     demandAltBox!.y + demandAltBox!.height / 2,
   );
   await page.mouse.down();
-  await page.mouse.move(demandAltBox!.x + demandAltBox!.width / 2 + 4, demandAltBox!.y + demandAltBox!.height / 2, { steps: 2 });
+  // Nudge toward the destination. Nudging the rightmost node farther right can
+  // be clamped by React Flow's reorder extent before a drag visibly starts.
+  await page.mouse.move(demandAltBox!.x + demandAltBox!.width / 2 - 12, demandAltBox!.y + demandAltBox!.height / 2, { steps: 2 });
+  await expect(demandAlt).toHaveClass(/dragging/);
   await page.mouse.move(demandBox!.x + demandBox!.width / 2, demandBox!.y + demandBox!.height / 2, { steps: 10 });
   await page.mouse.up();
   await expect.poll(async () =>

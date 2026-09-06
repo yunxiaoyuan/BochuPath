@@ -24,7 +24,7 @@ export function fitViewportToBounds(
   viewport: ViewportSize,
   options: FitViewportOptions = {},
 ): ViewportTransform {
-  const padding = Math.max(0, options.padding ?? 32);
+  const padding = Math.max(0, options.padding ?? 20);
   const minZoom = Math.max(0.0001, options.minZoom ?? 0.001);
   const maxZoom = Math.max(minZoom, options.maxZoom ?? 1);
   const availableWidth = Math.max(1, viewport.width - padding * 2);

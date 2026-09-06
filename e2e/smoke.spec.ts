@@ -33,8 +33,10 @@ test("fits the complete TB/LR canvas and renders directed arrows at 1440x900", a
   await expectCanvasInsideStage(page);
   const edgePaths = page.locator(".react-flow__edge-path");
   await expect(edgePaths).toHaveCount(2);
-  for (const edge of await edgePaths.all())
+  for (const edge of await edgePaths.all()) {
     await expect(edge).toHaveAttribute("marker-end", /url\(/);
+    await expect(edge).toHaveAttribute("d", /C/);
+  }
 
   await page.getByLabel("放大").click();
   await page.getByLabel("放大").click();
@@ -45,8 +47,10 @@ test("fits the complete TB/LR canvas and renders directed arrows at 1440x900", a
   await page.getByRole("button", { name: "确定" }).click();
   await page.getByRole("button", { name: "适应" }).click();
   await expectCanvasInsideStage(page);
-  for (const edge of await edgePaths.all())
+  for (const edge of await edgePaths.all()) {
     await expect(edge).toHaveAttribute("marker-end", /url\(/);
+    await expect(edge).toHaveAttribute("d", /C/);
+  }
 });
 
 test("reorders graph members with the canvas and persists node order", async ({
@@ -206,7 +210,7 @@ test("fully connects two nodes in each occupied layer", async ({ page }) => {
   await expect(page.locator(".react-flow__edge-path")).toHaveCount(6);
 });
 
-test("highlights every visible pathway node and edge without dimming unrelated nodes", async ({
+test("highlights complete node context without changing unrelated nodes", async ({
   page,
 }) => {
   await page.goto("/diagrams/diagram_demo/edit");
@@ -215,32 +219,74 @@ test("highlights every visible pathway node and edge without dimming unrelated n
   await page.getByLabel("所属叶子层级").selectOption({ label: "需求层" });
   await page.getByRole("button", { name: "确定" }).click();
   const unrelatedNode = page.getByRole("button", { name: /未关联节点，位于 需求层/ });
+  const unrelatedBusinessNode = unrelatedNode.locator(".business-node");
+  const paneBox = await page.locator(".react-flow__pane").boundingBox();
+  await page.mouse.click(paneBox!.x + paneBox!.width - 8, paneBox!.y + paneBox!.height - 8);
+  await expect(unrelatedBusinessNode).not.toHaveClass(/selected/);
+  await page.waitForTimeout(200);
+  const unrelatedStyleBefore = await unrelatedBusinessNode.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderColor: style.borderColor,
+      color: style.color,
+      filter: style.filter,
+      opacity: style.opacity,
+    };
+  });
   const reviewNode = page
     .getByRole("button", { name: /方案评审，位于 方案层/ })
     .locator(".business-node");
-  await page.getByRole("button", { name: /需求确认，位于 需求层/ }).click();
+  const selectedNode = page
+    .getByRole("button", { name: /需求确认，位于 需求层/ })
+    .locator(".business-node");
+  await selectedNode.click();
 
   const relatedNodes = page.locator(".business-node.related");
   await expect(relatedNodes).toHaveCount(2);
+  await expect(selectedNode).toHaveClass(/selected/);
+  await expect(selectedNode).toHaveCSS("background-color", "rgb(47, 100, 247)");
+  await expect(selectedNode).toHaveCSS("color", "rgb(255, 255, 255)");
   await expect(reviewNode).toHaveClass(/related/);
   await expect(reviewNode).toHaveCSS("outline-style", "none");
   await expect(reviewNode).toHaveCSS("border-style", "solid");
   await expect(reviewNode).toHaveCSS("border-width", "2px");
   expect(await reviewNode.evaluate((element) =>
     getComputedStyle(element).boxShadow,
-  )).toContain("inset");
+  )).not.toBe("none");
   await expect(page.locator(".react-flow__edge.related-edge")).toHaveCount(2);
-  await expect(unrelatedNode.locator(".business-node")).not.toHaveClass(/dimmed/);
+  await expect(unrelatedBusinessNode).not.toHaveClass(/dimmed/);
+  await expect.poll(() => unrelatedBusinessNode.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderColor: style.borderColor,
+      color: style.color,
+      filter: style.filter,
+      opacity: style.opacity,
+    };
+  })).toEqual(unrelatedStyleBefore);
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByText("✓ 已保存")).toBeVisible();
 
   await page.getByRole("button", { name: "查看", exact: true }).click();
   await expect(page.locator(".business-node.related")).toHaveCount(2);
   await expect(page.locator(".react-flow__edge.related-edge")).toHaveCount(2);
-  await expect(unrelatedNode.locator(".business-node")).not.toHaveClass(/dimmed/);
+  await expect(unrelatedBusinessNode).not.toHaveClass(/dimmed/);
+  await expect.poll(() => unrelatedBusinessNode.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderColor: style.borderColor,
+      color: style.color,
+      filter: style.filter,
+      opacity: style.opacity,
+    };
+  })).toEqual(unrelatedStyleBefore);
   await page.locator(".react-flow__pane").click({ position: { x: 12, y: 12 } });
   await expect(page.locator(".business-node.related")).toHaveCount(0);
   await expect(page.locator(".react-flow__edge.related-edge")).toHaveCount(0);
+  await expect(unrelatedBusinessNode).not.toHaveClass(/dimmed/);
   await expect(reviewNode).toHaveCSS("border-style", "dashed");
   await expect(reviewNode).toHaveCSS("border-width", "1px");
 });
@@ -352,24 +398,20 @@ test("offers and restores a newer local draft after reload", async ({ page }) =>
 });
 
 async function expectCanvasInsideStage(page: Page): Promise<void> {
-  await page.waitForTimeout(250);
-  const stage = await page.locator(".flow-wrap").boundingBox();
-  expect(stage).not.toBeNull();
+  const safeInset = 11; // 12px adaptive padding with 1px rendering tolerance.
   const nodes = page.locator(
     ".react-flow__node-layer, .react-flow__node-business",
   );
-  for (const node of await nodes.all()) {
-    const box = await node.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.x).toBeGreaterThanOrEqual(stage!.x + 23);
-    expect(box!.y).toBeGreaterThanOrEqual(stage!.y + 23);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(
-      stage!.x + stage!.width - 23,
-    );
-    expect(box!.y + box!.height).toBeLessThanOrEqual(
-      stage!.y + stage!.height - 23,
-    );
-  }
+  await expect.poll(async () => {
+    const stage = await page.locator(".flow-wrap").boundingBox();
+    if (!stage) return false;
+    const boxes = await Promise.all((await nodes.all()).map((node) => node.boundingBox()));
+    return boxes.every((box) => box &&
+      box.x >= stage.x + safeInset &&
+      box.y >= stage.y + safeInset &&
+      box.x + box.width <= stage.x + stage.width - safeInset &&
+      box.y + box.height <= stage.y + stage.height - safeInset);
+  }).toBe(true);
 }
 
 async function dragCanvasNode(
@@ -378,6 +420,21 @@ async function dragCanvasNode(
   target: Locator,
   grip: "center" | "header" = "center",
 ): Promise<void> {
+  const sourceId = await source.getAttribute("data-id");
+  await expect.poll(async () => {
+    const box = await source.boundingBox();
+    if (!box) return null;
+    const x = grip === "header" ? box.x + box.width - 28 : box.x + box.width / 2;
+    const y = grip === "header" ? box.y + 22 : box.y + box.height / 2;
+    return page.evaluate(({ x, y }) =>
+      document.elementFromPoint(x, y)?.closest(".react-flow__node")?.getAttribute("data-id") ?? null,
+    { x, y });
+  }).toBe(sourceId);
+  await Promise.all([source, target].map((locator) => locator.evaluate(async (element) => {
+    await Promise.all(element.getAnimations({ subtree: true }).map((animation) =>
+      animation.finished.catch(() => undefined),
+    ));
+  })));
   const sourceBox = await source.boundingBox();
   const targetBox = await target.boundingBox();
   expect(sourceBox).not.toBeNull();
@@ -394,7 +451,9 @@ async function dragCanvasNode(
   expect(sourceVisualBox).not.toBeNull();
   await page.mouse.move(sourceX, sourceY);
   await page.mouse.down();
-  await page.mouse.move(sourceX + 3, sourceY + 2, { steps: 2 });
+  const nudgeX = grip === "header" ? 0 : targetX >= sourceX ? 12 : -12;
+  const nudgeY = grip === "header" ? targetY >= sourceY ? 12 : -12 : 0;
+  await page.mouse.move(sourceX + nudgeX, sourceY + nudgeY, { steps: 2 });
   await expect(source).toHaveClass(/dragging/);
   expect(
     await source.evaluate((element) => element.classList.contains("selected")),

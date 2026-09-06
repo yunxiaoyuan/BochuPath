@@ -2,14 +2,13 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   BaseEdge,
-  Controls,
   Handle,
   MarkerType,
   MiniMap,
   Position,
   ReactFlow,
   ReactFlowProvider,
-  getSmoothStepPath,
+  getBezierPath,
   useNodesState,
   useReactFlow,
   useViewport,
@@ -48,6 +47,7 @@ import { useEditorStore } from "../../../editor/store";
 import { deriveEdges, derivePathwayEdges } from "../../../layout/derive-edges";
 import { fitViewportToBounds } from "../../../layout/fit-viewport";
 import {
+  ADAPTIVE_LAYOUT_PADDING,
   layoutDiagram,
   type DiagramLayout,
   type LayoutBusinessNode,
@@ -62,13 +62,13 @@ interface BusinessData extends Record<string, unknown> {
   kind: "business";
   node: DiagramNode;
   style: NodeStyle;
-  dimmed: boolean;
   related: boolean;
   candidate: boolean;
   pathwayMember: boolean;
   draftMember: boolean;
   fontSize: number;
   descriptionFontSize: number;
+  compactTitle: boolean;
   canReorder: boolean;
   reorderAxis: "横向" | "纵向";
 }
@@ -101,6 +101,10 @@ interface DragPreview {
 
 const MIN_ZOOM = 0.001;
 const MAX_ZOOM = 2.5;
+const AUTO_FIT_MAX_ZOOM = 1.25;
+const MIN_READABLE_FONT_SIZE = 12;
+const MIN_READABLE_DESCRIPTION_SIZE = 10;
+const LAYER_LABEL_FONT_SIZE = 12;
 
 export function PathwayCanvas(props: Props) {
   return (
@@ -127,8 +131,19 @@ function CanvasInner({ mode, onCreateNode }: Props) {
     CanvasEdge
   >();
   const { zoom } = useViewport();
+  const readableZoom = Math.min(
+    MAX_ZOOM,
+    Math.max(
+      MIN_READABLE_FONT_SIZE / Math.max(1, diagram.layout.fontSize),
+      MIN_READABLE_DESCRIPTION_SIZE / Math.max(1, diagram.layout.descriptionFontSize),
+      MIN_READABLE_DESCRIPTION_SIZE / LAYER_LABEL_FONT_SIZE,
+    ),
+  );
+  const isOverview = zoom + 0.001 < readableZoom;
   const stageRef = useRef<HTMLDivElement>(null);
+  const fitStrategyRef = useRef<"fit" | "readable">("fit");
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
+  const [showMiniMap, setShowMiniMap] = useState(false);
   const draggingRef = useRef(false);
   const dragPreviewRef = useRef<DragPreview | null>(null);
   const layout = useMemo(
@@ -254,13 +269,6 @@ function CanvasInner({ mode, onCreateNode }: Props) {
         selection?.kind === "node" &&
         selection.id !== node.id,
       );
-      const dimmed = draft
-        ? false
-        : editingFocusedPathway
-          ? false
-          : focusedIds.size
-          ? !focusedIds.has(node.id)
-          : false;
       const participationCount = nodePathways(diagram, node.id).length;
       const siblingRects = layout.nodes.filter((item) => item.layerId === node.layerId);
       const canReorder = mode === "edit" && tool === "select" && siblingRects.length > 1;
@@ -282,13 +290,17 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           kind: "business",
           node,
           style,
-          dimmed,
           related,
           candidate,
           pathwayMember,
           draftMember,
           fontSize: diagram.layout.fontSize,
           descriptionFontSize: diagram.layout.descriptionFontSize,
+          compactTitle: titleNeedsCompactTypography(
+            node.name,
+            rect.width,
+            diagram.layout.fontSize,
+          ),
           canReorder,
           reorderAxis: diagram.layout.direction === "TB" ? "横向" : "纵向",
         },
@@ -330,11 +342,13 @@ function CanvasInner({ mode, onCreateNode }: Props) {
       );
       const isFocused = focused === edge.pathwayId;
       const isNodeRelated = relatedPathwayIds.has(edge.pathwayId);
+      const emphasized = isFocused || isNodeRelated;
       const dimmed = focused
         ? !isFocused
         : selectedNodeContext
           ? !isNodeRelated
           : false;
+      const stroke = emphasized ? edge.color : "var(--color-path-muted)";
       return {
         id: edge.id,
         type: "parallel",
@@ -343,18 +357,24 @@ function CanvasInner({ mode, onCreateNode }: Props) {
         ...edgeHandleIds(source, target, layout.nodes, diagram.layout.direction),
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          color: edge.color,
-          width: 18,
-          height: 18,
+          color: stroke,
+          width: emphasized ? 13 : 10,
+          height: emphasized ? 13 : 10,
         },
         style: {
-          stroke: edge.color,
-          strokeWidth: isFocused || isNodeRelated ? 3 : 2,
+          stroke,
+          strokeWidth: emphasized ? 2.6 : 1.15,
           strokeDasharray: edge.lineStyle === "dashed" ? "7 5" : undefined,
-          opacity: dimmed ? 0.12 : 1,
+          strokeLinecap: "round",
+          strokeLinejoin: "round",
+          opacity: dimmed ? 0.08 : emphasized ? 0.96 : 0.34,
         },
-        zIndex: isFocused || isNodeRelated ? 3 : 2,
-        className: isNodeRelated ? "related-edge" : dimmed ? "dimmed-edge" : undefined,
+        zIndex: emphasized ? 3 : 2,
+        className: [
+          isNodeRelated ? "related-edge" : "",
+          isFocused ? "focused-edge" : "",
+          dimmed ? "dimmed-edge" : "",
+        ].filter(Boolean).join(" ") || undefined,
         selected:
           selection?.kind === "pathway" && selection.id === edge.pathwayId,
         selectable: true,
@@ -400,8 +420,10 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           },
           style: {
             stroke: draftPathway.color,
-            strokeWidth: 2,
+            strokeWidth: 2.4,
             strokeDasharray: "6 5",
+            strokeLinecap: "round",
+            strokeLinejoin: "round",
           },
           zIndex: 3,
           selectable: true,
@@ -421,13 +443,20 @@ function CanvasInner({ mode, onCreateNode }: Props) {
   }, [diagram, draft, focused, layout.nodes, relatedPathwayIds, selectedNodeContext, selection]);
 
   const fitCanvas = useCallback(
-    (duration = 200) => {
+    (duration = 200, strategy: "fit" | "readable" = "fit") => {
       const stage = stageRef.current?.getBoundingClientRect();
       if (!stage || stage.width <= 0 || stage.height <= 0) return;
+      fitStrategyRef.current = strategy;
       const viewport = fitViewportToBounds(
         layout.bounds,
         { width: stage.width, height: stage.height },
-        { padding: 32, minZoom: MIN_ZOOM, maxZoom: 1 },
+        {
+          padding: ADAPTIVE_LAYOUT_PADDING,
+          minZoom: strategy === "readable" ? readableZoom : MIN_ZOOM,
+          maxZoom: strategy === "readable"
+            ? Math.max(AUTO_FIT_MAX_ZOOM, readableZoom)
+            : AUTO_FIT_MAX_ZOOM,
+        },
       );
       void setViewport(viewport, { duration });
     },
@@ -436,6 +465,7 @@ function CanvasInner({ mode, onCreateNode }: Props) {
       layout.bounds.width,
       layout.bounds.x,
       layout.bounds.y,
+      readableZoom,
       setViewport,
     ],
   );
@@ -452,7 +482,7 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           : { width: bounds.width, height: bounds.height },
       );
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => fitCanvas(0));
+      frame = requestAnimationFrame(() => fitCanvas(0, fitStrategyRef.current));
     };
     const observer = new ResizeObserver(refit);
     observer.observe(stage);
@@ -760,19 +790,31 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           </div>
         )}
         <div className="tool-group">
-          <button onClick={() => fitCanvas()} title="按当前屏幕比例自动布局并适应画布">
+          <button
+            aria-pressed={showMiniMap}
+            onClick={() => setShowMiniMap((current) => !current)}
+            title="显示或隐藏画布导航图"
+          >
+            ▦ <span>导航图</span>
+          </button>
+          <button onClick={() => fitCanvas(200, "readable")} title="可读布局：正文至少约 12px，超大图可平移查看">
             布局
           </button>
           <button onClick={() => void zoomOut()} aria-label="缩小">
             −
           </button>
-          <output className="zoom-value" aria-label="当前缩放比例">
+          <output
+            className={`zoom-value ${isOverview ? "overview" : ""}`}
+            aria-label={`当前缩放比例 ${Math.round(zoom * 100)}%${isOverview ? "，全图概览" : ""}`}
+            title={isOverview ? "当前为全图概览；点击“布局”按可读字号查看" : "当前缩放比例"}
+          >
             {Math.round(zoom * 100)}%
+            {isOverview && <small>概览</small>}
           </output>
           <button onClick={() => void zoomIn()} aria-label="放大">
             ＋
           </button>
-          <button onClick={() => fitCanvas()} title="适应画布 0">
+          <button onClick={() => fitCanvas()} title="完整显示全部节点并适应画布">
             适应
           </button>
         </div>
@@ -834,15 +876,16 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           proOptions={{ hideAttribution: true }}
         >
           <Background gap={20} size={1} />
-          <Controls showFitView={false} showInteractive={false} />
-          <MiniMap
-            ariaLabel="画布缩略图"
-            pannable
-            zoomable
-            nodeColor={(node) =>
-              node.type === "layer" ? "transparent" : "var(--color-brand-5)"
-            }
-          />
+          {showMiniMap && (
+            <MiniMap
+              ariaLabel="画布缩略图"
+              pannable
+              zoomable
+              nodeColor={(node) =>
+                node.type === "layer" ? "transparent" : "var(--color-brand-5)"
+              }
+            />
+          )}
         </ReactFlow>
         <CanvasTextAlternative diagram={diagram} />
         {!diagram.layers.length && (
@@ -889,7 +932,7 @@ function CanvasTextAlternative({ diagram }: { diagram: Diagram }) {
 
 const BusinessNode = memo(({ data, selected }: NodeProps<BusinessFlowNode>) => (
   <div
-    className={`business-node ${data.canReorder ? "reorderable" : ""} ${selected ? "selected" : ""} ${data.pathwayMember ? "pathway-member" : ""} ${data.related ? "related" : ""} ${data.candidate ? "candidate" : ""} ${data.dimmed ? "dimmed" : ""}`}
+    className={`business-node ${data.canReorder ? "reorderable" : ""} ${selected ? "selected" : ""} ${data.pathwayMember ? "pathway-member" : ""} ${data.related ? "related" : ""} ${data.candidate ? "candidate" : ""}`}
     title={data.canReorder ? `${data.reorderAxis}拖动可调整同层节点顺序` : undefined}
     style={{
       background: data.style.fillColor,
@@ -907,7 +950,17 @@ const BusinessNode = memo(({ data, selected }: NodeProps<BusinessFlowNode>) => (
         ✓
       </b>
     )}
-    <strong style={{ fontSize: data.fontSize }}>{data.node.name}</strong>
+    <strong
+      className={data.compactTitle ? "compact-title" : undefined}
+      style={{
+        fontSize: data.compactTitle
+          ? Math.max(11, data.fontSize - 1)
+          : data.fontSize,
+        lineHeight: data.compactTitle ? 1.15 : 1.35,
+      }}
+    >
+      {data.node.name}
+    </strong>
     {data.node.decompositionItems.length > 0 && (
       <ul style={{ fontSize: data.descriptionFontSize }}>
         {data.node.decompositionItems.map((item, index) => (
@@ -935,15 +988,14 @@ LayerNode.displayName = "LayerNode";
 const ParallelEdge = memo((props: EdgeProps<CanvasEdge>) => {
   const offset = props.data?.offset ?? 0;
   const direction = props.data?.direction ?? "TB";
-  const [path] = getSmoothStepPath({
+  const [path] = getBezierPath({
     sourceX: props.sourceX + (direction === "TB" ? offset : 0),
     sourceY: props.sourceY + (direction === "LR" ? offset : 0),
     sourcePosition: props.sourcePosition,
     targetX: props.targetX + (direction === "TB" ? offset : 0),
     targetY: props.targetY + (direction === "LR" ? offset : 0),
     targetPosition: props.targetPosition,
-    borderRadius: 8,
-    offset: 24,
+    curvature: 0.28,
   });
   return (
     <BaseEdge
@@ -955,6 +1007,23 @@ const ParallelEdge = memo((props: EdgeProps<CanvasEdge>) => {
   );
 });
 ParallelEdge.displayName = "ParallelEdge";
+
+function titleNeedsCompactTypography(
+  text: string,
+  nodeWidth: number,
+  fontSize: number,
+): boolean {
+  const contentWidth = Math.max(32, nodeWidth - 16);
+  const estimatedWidth = [...text].reduce(
+    (total, character) =>
+      total + fontSize * (/^[\u0000-\u00ff]$/.test(character) ? 0.58 : 1),
+    0,
+  );
+  // The layout estimate deliberately stays lightweight, but bold browser text and
+  // the 2px selected/related border can consume a little more space than the base
+  // node. Keep a 3px reserve so titles do not re-wrap or clip when highlighted.
+  return estimatedWidth >= contentWidth - 3;
+}
 
 function applyDragPreview(
   nodes: CanvasNode[],

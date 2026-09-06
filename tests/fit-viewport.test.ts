@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { createDemoDiagram } from "../src/domain/seed";
 import type { Diagram } from "../src/domain/types";
 import { fitViewportToBounds } from "../src/layout/fit-viewport";
-import { layoutDiagram } from "../src/layout/swimlane-layout";
+import { ADAPTIVE_LAYOUT_PADDING, layoutDiagram } from "../src/layout/swimlane-layout";
 
 const VIEWPORT = { width: 872, height: 784 };
-const PADDING = 32;
+const PADDING = ADAPTIVE_LAYOUT_PADDING;
 
 describe("canvas fit viewport", () => {
   it.each([1, 10, 100, 500])(
@@ -30,10 +30,19 @@ describe("canvas fit viewport", () => {
     );
     expect(transform.zoom).toBe(1);
   });
+
+  it("supports a readable zoom floor when a complete fit would be too small", () => {
+    const transform = fitViewportToBounds(
+      { x: 20, y: 20, width: 1800, height: 2400 },
+      VIEWPORT,
+      { padding: PADDING, minZoom: 12 / 14, maxZoom: 1 },
+    );
+    expect(transform.zoom).toBeCloseTo(12 / 14);
+  });
 });
 
 function expectFits(diagram: Diagram): void {
-  const bounds = layoutDiagram(diagram).bounds;
+  const bounds = layoutDiagram(diagram, VIEWPORT).bounds;
   const transform = fitViewportToBounds(bounds, VIEWPORT, {
     padding: PADDING,
     minZoom: 0.001,
