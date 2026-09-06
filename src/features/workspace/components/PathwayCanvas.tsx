@@ -86,7 +86,6 @@ type CanvasNode = BusinessFlowNode | LayerFlowNode;
 interface ParallelData extends Record<string, unknown> {
   offset: number;
   direction: "TB" | "LR";
-  dimmed: boolean;
   pathwayId?: string;
   draft?: boolean;
 }
@@ -343,11 +342,6 @@ function CanvasInner({ mode, onCreateNode }: Props) {
       const isFocused = focused === edge.pathwayId;
       const isNodeRelated = relatedPathwayIds.has(edge.pathwayId);
       const emphasized = isFocused || isNodeRelated;
-      const dimmed = focused
-        ? !isFocused
-        : selectedNodeContext
-          ? !isNodeRelated
-          : false;
       const stroke = emphasized ? edge.color : "var(--color-path-muted)";
       return {
         id: edge.id,
@@ -358,8 +352,8 @@ function CanvasInner({ mode, onCreateNode }: Props) {
         markerEnd: {
           type: MarkerType.ArrowClosed,
           color: stroke,
-          width: emphasized ? 13 : 10,
-          height: emphasized ? 13 : 10,
+          width: 8,
+          height: 8,
         },
         style: {
           stroke,
@@ -367,13 +361,12 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           strokeDasharray: edge.lineStyle === "dashed" ? "7 5" : undefined,
           strokeLinecap: "round",
           strokeLinejoin: "round",
-          opacity: dimmed ? 0.08 : emphasized ? 0.96 : 0.34,
+          opacity: emphasized ? 0.96 : 0.56,
         },
         zIndex: emphasized ? 3 : 2,
         className: [
           isNodeRelated ? "related-edge" : "",
           isFocused ? "focused-edge" : "",
-          dimmed ? "dimmed-edge" : "",
         ].filter(Boolean).join(" ") || undefined,
         selected:
           selection?.kind === "pathway" && selection.id === edge.pathwayId,
@@ -384,7 +377,6 @@ function CanvasInner({ mode, onCreateNode }: Props) {
         data: {
           offset: edge.parallelOffset,
           direction: diagram.layout.direction,
-          dimmed,
           pathwayId: edge.pathwayId,
         },
       };
@@ -415,8 +407,8 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           markerEnd: {
             type: MarkerType.ArrowClosed,
             color: draftPathway.color,
-            width: 18,
-            height: 18,
+            width: 8,
+            height: 8,
           },
           style: {
             stroke: draftPathway.color,
@@ -433,7 +425,6 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           data: {
             offset: 0,
             direction: diagram.layout.direction,
-            dimmed: false,
             draft: true,
           },
         };

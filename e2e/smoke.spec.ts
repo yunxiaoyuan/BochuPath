@@ -36,6 +36,7 @@ test("fits the complete TB/LR canvas and renders directed arrows at 1440x900", a
   for (const edge of await edgePaths.all()) {
     await expect(edge).toHaveAttribute("marker-end", /url\(/);
     await expect(edge).toHaveAttribute("d", /C/);
+    await expectEdgeMarkerSize(edge, 8);
   }
 
   await page.getByLabel("放大").click();
@@ -50,6 +51,7 @@ test("fits the complete TB/LR canvas and renders directed arrows at 1440x900", a
   for (const edge of await edgePaths.all()) {
     await expect(edge).toHaveAttribute("marker-end", /url\(/);
     await expect(edge).toHaveAttribute("d", /C/);
+    await expectEdgeMarkerSize(edge, 8);
   }
 });
 
@@ -163,6 +165,7 @@ test("shows an arrowed draft edge and clears the complete draft with Escape", as
   const draft = page.locator(".draft-edge .react-flow__edge-path");
   await expect(draft).toHaveCount(1);
   await expect(draft).toHaveAttribute("marker-end", /url\(/);
+  await expectEdgeMarkerSize(draft, 8);
   expect(
     await draft.evaluate(
       (element) => (element as SVGPathElement).style.strokeDasharray,
@@ -220,20 +223,26 @@ test("highlights complete node context without changing unrelated nodes", async 
   await page.getByRole("button", { name: "确定" }).click();
   const unrelatedNode = page.getByRole("button", { name: /未关联节点，位于 需求层/ });
   const unrelatedBusinessNode = unrelatedNode.locator(".business-node");
+
+  await page.getByRole("button", { name: /新建通路/ }).click();
+  await unrelatedNode.click();
+  await page.getByRole("button", { name: /方案评审，位于 方案层/ }).click();
+  await page.getByRole("button", { name: "完成", exact: true }).click();
+  await expect(page.locator(".react-flow__edge-path")).toHaveCount(3);
+
   const paneBox = await page.locator(".react-flow__pane").boundingBox();
   await page.mouse.click(paneBox!.x + paneBox!.width - 8, paneBox!.y + paneBox!.height - 8);
   await expect(unrelatedBusinessNode).not.toHaveClass(/selected/);
   await page.waitForTimeout(200);
-  const unrelatedStyleBefore = await unrelatedBusinessNode.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return {
-      backgroundColor: style.backgroundColor,
-      borderColor: style.borderColor,
-      color: style.color,
-      filter: style.filter,
-      opacity: style.opacity,
-    };
-  });
+  const unrelatedEdge = page
+    .getByRole("button", { name: /新通路：未关联节点 到 方案评审/ })
+    .locator(".react-flow__edge-path");
+  const unrelatedLayer = page.locator(
+    '.react-flow__node-layer[data-id="layer::layer_demand"] .layer-canvas-node',
+  );
+  const unrelatedNodeStyleBefore = await visualStyle(unrelatedBusinessNode);
+  const unrelatedEdgeStyleBefore = await visualStyle(unrelatedEdge);
+  const unrelatedLayerStyleBefore = await visualStyle(unrelatedLayer);
   const reviewNode = page
     .getByRole("button", { name: /方案评审，位于 方案层/ })
     .locator(".business-node");
@@ -256,16 +265,10 @@ test("highlights complete node context without changing unrelated nodes", async 
   )).not.toBe("none");
   await expect(page.locator(".react-flow__edge.related-edge")).toHaveCount(2);
   await expect(unrelatedBusinessNode).not.toHaveClass(/dimmed/);
-  await expect.poll(() => unrelatedBusinessNode.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return {
-      backgroundColor: style.backgroundColor,
-      borderColor: style.borderColor,
-      color: style.color,
-      filter: style.filter,
-      opacity: style.opacity,
-    };
-  })).toEqual(unrelatedStyleBefore);
+  await expect(unrelatedEdge.locator("xpath=..")).not.toHaveClass(/dimmed-edge/);
+  await expect.poll(() => visualStyle(unrelatedBusinessNode)).toEqual(unrelatedNodeStyleBefore);
+  await expect.poll(() => visualStyle(unrelatedEdge)).toEqual(unrelatedEdgeStyleBefore);
+  await expect.poll(() => visualStyle(unrelatedLayer)).toEqual(unrelatedLayerStyleBefore);
   await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByText("✓ 已保存")).toBeVisible();
 
@@ -273,16 +276,9 @@ test("highlights complete node context without changing unrelated nodes", async 
   await expect(page.locator(".business-node.related")).toHaveCount(2);
   await expect(page.locator(".react-flow__edge.related-edge")).toHaveCount(2);
   await expect(unrelatedBusinessNode).not.toHaveClass(/dimmed/);
-  await expect.poll(() => unrelatedBusinessNode.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return {
-      backgroundColor: style.backgroundColor,
-      borderColor: style.borderColor,
-      color: style.color,
-      filter: style.filter,
-      opacity: style.opacity,
-    };
-  })).toEqual(unrelatedStyleBefore);
+  await expect.poll(() => visualStyle(unrelatedBusinessNode)).toEqual(unrelatedNodeStyleBefore);
+  await expect.poll(() => visualStyle(unrelatedEdge)).toEqual(unrelatedEdgeStyleBefore);
+  await expect.poll(() => visualStyle(unrelatedLayer)).toEqual(unrelatedLayerStyleBefore);
   await page.locator(".react-flow__pane").click({ position: { x: 12, y: 12 } });
   await expect(page.locator(".business-node.related")).toHaveCount(0);
   await expect(page.locator(".react-flow__edge.related-edge")).toHaveCount(0);
@@ -412,6 +408,35 @@ async function expectCanvasInsideStage(page: Page): Promise<void> {
       box.x + box.width <= stage.x + stage.width - safeInset &&
       box.y + box.height <= stage.y + stage.height - safeInset);
   }).toBe(true);
+}
+
+async function expectEdgeMarkerSize(edge: Locator, size: number): Promise<void> {
+  await expect.poll(() => edge.evaluate((element) => {
+    const reference = element.getAttribute("marker-end") ?? "";
+    const markerId = reference
+      .replace(/^url\(['"]?#/, "")
+      .replace(/['"]?\)$/, "");
+    const marker = markerId ? element.ownerDocument.getElementById(markerId) : null;
+    return {
+      height: marker?.getAttribute("markerHeight") ?? null,
+      width: marker?.getAttribute("markerWidth") ?? null,
+    };
+  })).toEqual({ height: String(size), width: String(size) });
+}
+
+async function visualStyle(locator: Locator) {
+  return locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderColor: style.borderColor,
+      color: style.color,
+      filter: style.filter,
+      opacity: style.opacity,
+      stroke: style.stroke,
+      strokeWidth: style.strokeWidth,
+    };
+  });
 }
 
 async function dragCanvasNode(
