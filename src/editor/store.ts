@@ -18,8 +18,10 @@ import {
 import type { DiagramCommand } from "./commands";
 import { getRepository } from "../persistence/get-repository";
 import type { DraftRecord } from "../persistence/repository";
+import { ApiError } from "../auth/client";
 
 let draftTimer: ReturnType<typeof setTimeout> | undefined;
+let sessionGeneration = 0;
 
 interface EditorState {
   diagram: Diagram | null;
@@ -35,6 +37,8 @@ interface EditorState {
   history: HistoryState;
   message: string;
   loading: boolean;
+  writeAllowed: boolean;
+  setWriteAccess: (allowed: boolean) => void;
   recoverableDraft: DraftRecord | null;
   load: (id: string, mode: EditorMode) => Promise<void>;
   execute: (label: string, command: DiagramCommand) => boolean;
@@ -65,13 +69,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   message: "",
   loading: true,
   recoverableDraft: null,
+  writeAllowed: true,
+  setWriteAccess: (allowed) => {
+    const state = get();
+    if (!allowed && state.writeAllowed && state.diagram && state.saveState !== 'clean') preserveEditorDraft();
+    set(allowed ? { writeAllowed: true } : {
+      writeAllowed: false, mode: 'view', tool: 'select', pathwayDraft: null,
+      message: state.writeAllowed ? '当前为只读权限，未保存修改已保留为个人草稿，可导出备份。' : state.message,
+    });
+  },
   load: async (id, mode) => {
+    const generation = ++sessionGeneration;
     clearTimeout(draftTimer);
     set({ loading: true, mode, message: "" });
     try {
       const repository = getRepository();
       const diagram = await repository.get(id);
       const draft = await repository.getDraft(id);
+      if (generation !== sessionGeneration) return;
       const recoverableDraft =
         draft && new Date(draft.savedAt) > new Date(diagram.updatedAt)
           ? draft
@@ -87,12 +102,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         loading: false,
       });
     } catch (error) {
+      if (generation !== sessionGeneration) return;
       set({ loading: false, message: domainMessage(error) });
     }
   },
   execute: (label, command) => {
     const state = get();
-    if (state.mode !== "edit" || !state.diagram) return false;
+    if (!state.writeAllowed || state.mode !== "edit" || !state.diagram) return false;
     try {
       const before = state.diagram;
       const after = command(before);
@@ -120,6 +136,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   setMode: (mode) => {
     const state = get();
+    if (!state.writeAllowed && mode === 'edit') return;
     const exitsPathway = state.selection?.kind === "pathway" || state.selection?.kind === "pathwayDraft";
     set({
       mode,
@@ -132,6 +149,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   setTool: (tool) => {
     const state = get();
+    if (!state.writeAllowed && (tool === 'connectPathway' || tool === 'createNode')) return;
     if (tool === "connectPathway")
       set({
         tool,
@@ -211,7 +229,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setPathwayDraft: (pathwayDraft) => set({ pathwayDraft }),
   undo: () => {
     const state = get();
-    if (state.mode !== "edit" || !state.diagram) return;
+    if (!state.writeAllowed || state.mode !== "edit" || !state.diagram) return;
     const result = undo(state.history, state.diagram);
     if (result) {
       const dirty =
@@ -229,7 +247,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   redo: () => {
     const state = get();
-    if (state.mode !== "edit" || !state.diagram) return;
+    if (!state.writeAllowed || state.mode !== "edit" || !state.diagram) return;
     const result = redo(state.history, state.diagram);
     if (result) {
       const dirty =
@@ -247,7 +265,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   save: async () => {
     const state = get();
-    if (!state.diagram || state.mode !== "edit") return;
+    const generation = sessionGeneration;
+    if (!state.writeAllowed || !state.diagram || state.mode !== "edit" || state.saveState === 'saving') return;
     const issues = validateDiagram(state.diagram);
     if (issues.length) {
       set({
@@ -257,24 +276,38 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return;
     }
     clearTimeout(draftTimer);
+    // Persist before a request can expire the identity or be interrupted by navigation.
+    preserveEditorDraft();
     set({ saveState: "saving", message: "正在保存" });
     try {
       const saved = await getRepository().save(
         state.diagram,
         state.baseRevision,
       );
+      if (generation !== sessionGeneration) return;
+      const current = get();
+      const changedWhileSaving = current.diagram && !diagramsHaveSameContent(current.diagram, state.diagram);
+      const nextDiagram = changedWhileSaving
+        ? { ...current.diagram!, revision: saved.revision, updatedAt: saved.updatedAt }
+        : saved;
       set({
-        diagram: saved,
+        diagram: nextDiagram,
         savedDiagram: structuredClone(saved),
         baseRevision: saved.revision,
-        saveState: "clean",
+        saveState: changedWhileSaving ? "dirty" : "clean",
         recoverableDraft: null,
-        message: "保存成功",
-        history: createHistory(),
+        message: changedWhileSaving ? "提交的版本已保存，保存期间的新修改仍待保存" : "保存成功",
+        history: changedWhileSaving ? current.history : createHistory(),
       });
+      if (changedWhileSaving) preserveEditorDraft();
     } catch (error) {
+      if (generation !== sessionGeneration) return;
       set({ saveState: "saveError", message: domainMessage(error) });
-      queueDraft(state.diagram, true, (draftError) =>
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        get().setWriteAccess(false);
+        return;
+      }
+      queueDraft(get().diagram ?? state.diagram, true, (draftError) =>
         set({ message: domainMessage(draftError), saveState: "saveError" }),
       );
     }
@@ -283,7 +316,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const state = get();
     if (!state.diagram || !state.recoverableDraft) return;
     if (recover) {
-      const recovered = state.recoverableDraft.diagram;
+      const recovered = { ...state.recoverableDraft.diagram, revision: state.baseRevision };
       const dirty =
         !state.savedDiagram ||
         !diagramsHaveSameContent(recovered, state.savedDiagram);
@@ -295,7 +328,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         message: "已恢复本地草稿",
       });
     } else {
+      const generation = sessionGeneration;
       await getRepository().deleteDraft(state.diagram.id);
+      if (generation !== sessionGeneration) return;
       set({ recoverableDraft: null, message: "已放弃本地草稿" });
     }
   },
@@ -329,6 +364,7 @@ function queueDraft(
 }
 
 function domainMessage(error: unknown, diagram?: Diagram | null): string {
+  if (error instanceof ApiError) return error.message;
   if (error instanceof DomainError) {
     const pathwayId = error.issue.path?.match(/^pathways\.([^.]+)/)?.[1];
     const pathway = pathwayId
@@ -339,4 +375,34 @@ function domainMessage(error: unknown, diagram?: Diagram | null): string {
   if (error instanceof Error && error.message in errorMessages)
     return errorMessages[error.message as keyof typeof errorMessages];
   return "操作失败，请稍后重试";
+}
+
+/** Flush while the departing identity is still available to the scoped draft adapter. */
+export function preserveEditorDraft(): void {
+  clearTimeout(draftTimer);
+  const state = useEditorStore.getState();
+  if (state.diagram && state.saveState !== 'clean') {
+    void getRepository().saveDraft(state.diagram).catch(() => {
+      useEditorStore.setState({ message: '个人草稿保存失败，请在离开前导出当前通路图。' });
+    });
+  }
+}
+
+export function resetEditorSession(): void {
+  clearTimeout(draftTimer);
+  sessionGeneration++;
+  useEditorStore.setState({
+    diagram: null, savedDiagram: null, baseRevision: 0, mode: 'view', writeAllowed: false,
+    tool: 'select', selection: null, multiSelectedNodeIds: [], focusedPathwayId: null,
+    pathwayDraft: null, saveState: 'clean', history: createHistory(), message: '',
+    loading: true, recoverableDraft: null,
+  });
+}
+
+export function suspendEditorSession(): void {
+  // In-flight reads/writes from a departed session must never repopulate the editor.
+  sessionGeneration++;
+  clearTimeout(draftTimer);
+  useEditorStore.getState().setWriteAccess(false);
+  if (useEditorStore.getState().saveState === 'saving') useEditorStore.setState({ saveState: 'saveError' });
 }

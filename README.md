@@ -1,28 +1,32 @@
-# BochuPath 业务通路图 Web 工具 V1.0
+# BochuPath 业务通路图 Web 工具
 
 一个由结构化 `Diagram` 数据驱动的业务通路图桌面 Web 工具。用户维护层级、节点、语义节点样式和通路节点集合；画布坐标和有向边均自动派生，不保存自由坐标或独立 Edge。通路是分层有向图，不是节点步骤链。
 
-## 运行
+## 本地体验（固定测试账号）
 
 ```bash
 npm install
-npm run dev
+npm run dev:auth
 ```
 
-打开 `http://localhost:5173/diagrams`。首次运行会从初始种子创建 `.bochupath/bochupath-data.json`；本机不同浏览器访问同一开发服务器时也读取这份共享数据。
+打开 `http://127.0.0.1:5180/diagrams`，可选择只读体验员、编辑体验员或管理员体验员。体验数据写入 `.bochupath/auth-demo/bochupath.sqlite`。这些固定账号只在显式启用的本机开发模式存在，正式环境没有测试账号。
 
 Windows 用户也可以直接双击根目录的 `start.bat`：脚本会在缺少依赖时自动执行安装，启动开发服务器并打开图库页面。关闭开发服务器窗口即可停止服务。
 
-## 登录与权限规划
+## 登录与权限
 
-PageDrop 线上外链使用企业微信组织白名单作为入口门禁。当前静态版尚未实现安全的应用内读写角色隔离；V1.1 将采用“内部成员默认只读，管理员邀请、用户申请审批或管理员直接开通后获得写权限”，并要求服务器校验每一次写请求。完整方案见 [企业微信登录与权限设计](docs/access-permission-design.md)。
+当前版本已实现独立的 BochuPath 企业微信登录与服务器端权限系统。企业内部在职成员可以登录，首次进入默认为只读；写权限可通过管理员邀请、用户申请后审批或管理员直接开通获得。角色分为 Reader、Editor、Admin，每一次创建、导入、保存、复制、删除和权限变更都由服务器重新校验，前端隐藏按钮不是安全边界。
+
+权限管理包括申请批准/拒绝/撤回、邀请接受/拒绝/取消/过期、直接授权和撤权、最后管理员保护、审计日志及可选企业微信通知。登录票据只保存在 `HttpOnly` Cookie；共享正式数据存入服务端 SQLite，个人未保存草稿按企微 `userId + diagramId` 隔离在当前浏览器。完整契约见 [企业微信登录与权限设计](docs/access-permission-design.md)。
 
 ## 验证
 
 ```bash
 npm run typecheck
 npm test
+npm run test:server
 npm run test:e2e
+npm run test:auth:e2e
 npm run build
 ```
 
@@ -35,7 +39,8 @@ E2E 同时运行 `@axe-core/playwright` 的浅色/深色主题 WCAG 2 A/AA 自�
 - `src/domain`：V1.1 持久化类型、V1.0 显式迁移、Zod Schema、稳定错误码、叶子层级/同层节点固定顺序、不变量与种子数据。
 - `src/editor`：所有事实数据写入所经过的领域命令、100 步 Undo/Redo 与 Zustand 编辑状态。
 - `src/layout`：从 Pathway 节点集合派生分层有向 Edge，以及相同输入得到相同坐标的 TB/LR 泳道布局；嵌套层级由内向外递归包围直属子层，并为相邻嵌套子树保留安全间距。
-- `src/persistence`：Repository 接口、localStorage Adapter 与 PageDrop 共享 JSON Adapter；所有正式保存使用 revision 乐观锁，个人草稿始终留在当前浏览器。
+- `src/persistence`：Repository 接口、受保护 HTTP Adapter，以及仅供旧版兼容的 localStorage/PageDrop Adapter；正式保存使用 revision 乐观锁，个人草稿始终留在当前浏览器。
+- `server`：同源身份、会话、角色、权限流程、通路图持久化、审计与企业微信适配器；业务数据和权限数据位于静态目录之外。
 - `src/persistence/exchange.ts`：Diagram JSON 的序列化、Schema/业务校验和安全文件名处理；导入通过 Repository 创建新图，不覆盖已有图。
 - `src/features`：图库、三栏工作台、统一 Selection、Inspector CRUD、查看查询和 React Flow 派生画布。
 
@@ -51,9 +56,9 @@ E2E 同时运行 `@axe-core/playwright` 的浅色/深色主题 WCAG 2 A/AA 自�
 
 结构面板支持批量添加层级或节点：中文分号、英文分号和换行均可分隔名称；同一批层级共享上级，同一批节点共享叶子层级与样式。添加节点时，所属叶子层级默认取当前选中的叶子层级（选中节点时取其所属层级），无上下文时回退到第一个叶子层级；添加过程中切换选中叶子层级，所属层级会同步更新。提交前会按输入顺序预览并检查名称，整批写入只产生一条撤销历史。
 
-## 本机数据与个人草稿
+## 数据与个人草稿
 
-`npm run dev` 使用与 PageDrop 相同的共享 JSON Repository，正式数据保存在被 Git 忽略的 `.bochupath/bochupath-data.json`。`public/bochupath-data.json` 只负责初始化和构建产物的首次发布数据，运行时保存不会改动它。
+安全模式下，正式数据保存在服务器 `BOCHUPATH_DATA_DIRECTORY/bochupath.sqlite`。浏览器不能读取数据库或直接覆盖共享 JSON；所有修改都通过同源 `/api/bochupath/v1` 完成。个人草稿使用 `bochupath:v2:draft:<企微 userId>:<diagramId>`，切换账号、登录失效或写权限被撤销时不会把草稿交给另一个账号。
 
 个人草稿和不支持 JSON 写入的普通静态托管使用浏览器存储：
 
@@ -61,7 +66,7 @@ E2E 同时运行 `@axe-core/playwright` 的浅色/深色主题 WCAG 2 A/AA 自�
 - `bochupath:v1:diagram:<diagramId>`
 - `bochupath:v1:draft:<diagramId>`
 
-进入浏览器存储兜底模式时，会把旧的 `pathway:v1:*` 数据复制迁移到 `bochupath:v1:*`；为便于恢复，旧 key 不会自动删除。切换到本机共享 JSON 不会删除任何旧浏览器数据。
+旧版无权限静态模式仍保留 V1 数据适配器，仅用于历史数据读取和旧测试，不用于正式部署。
 
 每个领域命令在 500ms 防抖后写草稿；手动保存递增 revision、清除草稿并重置命令历史。脏状态相对于最近一次成功保存的事实数据计算，因此撤销回保存基线会恢复“已保存”状态并清理草稿，重做后重新变为未保存。加载到更新草稿时由用户选择恢复或放弃。
 
@@ -73,15 +78,25 @@ E2E 同时运行 `@axe-core/playwright` 的浅色/深色主题 WCAG 2 A/AA 自�
 
 普通浏览器点击工作台“导出”会优先打开系统保存文件对话框；不支持该浏览器 API 时退回直接下载 `.json` 文件。PageDrop 沙箱不开放下载权限，导出弹窗会保留同样的 JSON 文本并提供复制按钮，可手动保存为 `.json` 文件。
 
-## PageDrop 可运行副本
+## 旧共享 JSON 迁移
 
-生产构建可以将 `dist/` 打包为包含 `index.html` 的 zip 后上传到 PageDrop。Vite 只在本地构建，PageDrop 只运行静态文件。构建产物使用相对资源路径；应用在 PageDrop 页面中自动切换为 Hash 路由，并通过 PageDrop JSON SDK 或带 `credentials: "include"` 的同外链相对请求读写 `bochupath-data.json`。多人可在不同浏览器中异步编辑：保存时递增 Diagram revision，其他协作者刷新、重新打开或回到图库后读取最新版本；基于旧 revision 的保存会被拒绝，本地草稿不会丢失。
+先停掉 BochuPath 服务，并备份旧 `bochupath-data.json`。默认命令只校验、不写入：
 
-PageDrop 的 JSON 覆盖写接口目前没有原子 compare-and-swap，因此这是异步协作而不是实时同屏协作。应避免两人同时在数秒内保存同一张图；更新 PageDrop 代码包时必须先下载线上 `bochupath-data.json`。Schema 不变时原样保留，Schema 升级时运行显式迁移并校验所有业务对象后再合包。本机开发通过 Vite 的同名 JSON 读写端点复现相同语义；嵌入环境限制浏览器存储时个人草稿降级到当前会话内存。
+```bash
+npm run data:import -- --source /绝对路径/bochupath-data.json --data-directory /部署数据目录
+npm run data:import -- --source /绝对路径/bochupath-data.json --data-directory /部署数据目录 --apply
+```
 
-线上 PageDrop iframe 权限为 `allow-scripts allow-same-origin allow-popups`。React、ES Module、DOM/SVG、React Flow、Pointer/Keyboard 事件、ResizeObserver 和 Hash 路由可用；沙箱没有 `allow-forms`、`allow-modals` 或 `allow-downloads`。因此所有表单都阻止原生导航并由 React 事件提交，确认和错误使用应用内组件，PageDrop 导出使用 JSON 文本和复制操作。应用不使用 Worker、Service Worker、父窗口 DOM、顶层跳转、全屏、Pointer Lock 或跨域接口。
+迁移会先执行 Schema 和引用完整性校验，只允许写入空数据库，保留原通路图 ID 与 revision，并在私有数据目录保存源文件副本和迁移审计。同一源文件重复执行不会重复写入；不同源文件不能覆盖已迁移数据库。
 
-Playwright 使用与线上相同的完整 sandbox 字符串回归图库/Inspector CRUD、跨层与同层多节点通路、画布直接编辑、编辑/查看关联高亮、共享保存、刷新重开、草稿恢复、版本冲突、应用内 Dialog、键盘、拖动、缩放和 200% 浏览器缩放，并检查页面控制台错误。真实已发布外链的写入测试需要单独配置 PageDrop API Token，本仓库测试不会修改线上外链。
+## 正式部署
+
+1. 在企业微信创建自建应用，设置网页授权回调域名及可信域名，并确认应用可见范围。
+2. 复制 `.env.example` 为部署服务器的 `.env`，填写准确的企微 `userId` 初始管理员、允许的根部门 ID、企业 ID、AgentId、Secret 和唯一 HTTPS 访问域名。不得提交真实密钥。
+3. 先执行旧数据迁移，再运行 `docker compose up -d --build`；由 Nginx、Caddy 或企业网关把该 HTTPS 域名同源转发到容器 `127.0.0.1:3000`。
+4. 用初始管理员和普通成员分别验收登录、只读、申请、审批、撤权、审计与保存冲突，再关闭旧 PageDrop 共享 JSON 写入口。
+
+新的安全版必须由 Node 服务提供静态页面和同源 API，不能把 `dist/` 单独上传到 PageDrop 后宣称已启用账号权限。PageDrop 可继续作为企业入口门禁或反向代理的外层，但必须把可信身份和所有写请求交给 BochuPath 服务端校验。
 
 ## V1.0 边界
 

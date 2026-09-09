@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAppDialog } from "../../app/AppDialog";
-import { isPageDropRuntime, usesSharedJsonRepository } from "../../app/runtime";
+import { isPageDropRuntime, usesSecureApi, usesSharedJsonRepository } from "../../app/runtime";
+import { useAuth } from "../../auth/AuthProvider";
+import { AccountMenu, PermissionBanner } from "../../auth/components";
 import { createPathway } from "../../editor/commands";
 import { useEditorStore } from "../../editor/store";
 import type { EditorMode } from "../../domain/types";
@@ -26,7 +28,9 @@ interface Props {
   onTheme: () => void;
 }
 
-export function WorkspacePage({ mode, theme, onTheme }: Props) {
+export function WorkspacePage({ mode: requestedMode, theme, onTheme }: Props) {
+  const { canWrite, session } = useAuth();
+  const mode = canWrite ? requestedMode : 'view';
   const { diagramId = "" } = useParams();
   const navigate = useNavigate();
   const dialog = useAppDialog();
@@ -39,9 +43,12 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
   const shared = usesSharedJsonRepository();
   useEffect(() => {
     const current = useEditorStore.getState();
+    current.setWriteAccess(canWrite);
     if (current.diagram?.id === diagramId) current.setMode(mode);
     else void current.load(diagramId, mode);
-  }, [diagramId, mode]);
+    if (!canWrite && requestedMode === 'edit') navigate(`/diagrams/${diagramId}/view`, { replace: true });
+    if (!canWrite) setCreateKind(null);
+  }, [diagramId, mode, canWrite, requestedMode, navigate, session?.user.userId]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const current = useEditorStore.getState();
@@ -135,6 +142,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
     navigate("/diagrams");
   };
   const switchMode = async (next: EditorMode) => {
+    if (next === 'edit' && !canWrite) return;
     if (next === mode) return;
     if (
       (state.saveState === "dirty" || state.saveState === "saveError") &&
@@ -205,6 +213,8 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
           </button>
           <button
             aria-pressed={mode === "edit"}
+            disabled={!canWrite}
+            title={canWrite ? '编辑通路图' : '需要编辑权限'}
             onClick={() => void switchMode("edit")}
           >
             编辑
@@ -274,14 +284,22 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
           >
             {theme === "light" ? "◐" : "○"}
           </button>
+          <AccountMenu />
         </div>
       </header>
+      <div className="workspace-notices">
+      <PermissionBanner />
       {state.recoverableDraft && (
         <div className="draft-banner" role="alert">
           <span>发现比上次保存更新的本地草稿。</span>
           <button
             className="primary-button small"
-            onClick={() => void state.recoverDraft(true)}
+            onClick={async () => {
+              if (state.recoverableDraft?.diagram.revision !== state.baseRevision && !await dialog.confirm({
+                title: '恢复旧版本草稿', message: '共享图已更新。恢复后请先核对并合并他人的修改；再次保存会以当前草稿替换共享图。', confirmLabel: '恢复并核对',
+              })) return;
+              await state.recoverDraft(true);
+            }}
           >
             恢复草稿
           </button>
@@ -290,6 +308,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
           </button>
         </div>
       )}
+      </div>
       <main
         className={`workspace-main ${leftOpen ? "" : "left-closed"} ${rightOpen ? "" : "right-closed"}`}
       >
@@ -328,7 +347,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
         <span>
           {diagram.layers.length} 层 · {diagram.nodes.length} 节点 ·{" "}
           {diagram.pathways.length} 通路 ·{" "}
-          {theme === "light" ? "Light" : "Dark"} · {shared ? "共享数据" : "本机数据"}
+          {theme === "light" ? "Light" : "Dark"} · {usesSecureApi() ? "企业数据" : shared ? "共享数据" : "本机数据"}
         </span>
       </footer>
       <div className="small-viewport-warning">

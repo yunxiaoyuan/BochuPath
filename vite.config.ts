@@ -65,14 +65,17 @@ function bochuPathLocalData(): Plugin {
   };
 }
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   base: './',
-  plugins: [react(), bochuPathLocalData()],
+  plugins: [react(), ...(mode === 'legacy' ? [bochuPathLocalData()] : [])],
+  // Production data is served by the authenticated API, never as a public JSON asset.
+  publicDir: mode === 'legacy' ? 'public' : false,
+  server: { proxy: { '/api/bochupath/v1': 'http://127.0.0.1:' + (process.env.BOCHUPATH_API_PORT || '4181') } },
   test: {
     environment: 'jsdom',
     globals: true,
-    exclude: ['e2e/**', 'node_modules/**'],
+    exclude: ['e2e/**', 'server/**', 'node_modules/**'],
     setupFiles: ['./src/test/setup.ts'],
     coverage: { reporter: ['text', 'html'] },
   },
-});
+}));

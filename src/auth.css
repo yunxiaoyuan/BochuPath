@@ -1,0 +1,91 @@
+/* BOCHUI desktop forms, tables and status surfaces; colors follow the existing Light/Dark tokens. */
+.auth-app-content { height: 100%; }
+.auth-app-content[hidden] { display: none; }
+.auth-brand { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.auth-brand a { color: var(--color-text-1); text-decoration: none; font-weight: 700; }
+.auth-login-shell { min-height: 100%; overflow: auto; height: 100%; display: grid; place-items: center; padding: 24px; background: var(--color-bg-page); }
+.auth-login-panel { width: min(460px, 100%); padding: 28px; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-bg-base); box-shadow: var(--shadow-float); }
+.auth-login-panel h1 { font-size: 22px; margin: 28px 0 12px; }
+.auth-login-panel p { color: var(--color-text-2); font-size: 13px; line-height: 1.65; }
+.auth-login-panel > small { display: block; color: var(--color-text-3); font-size: 11px; margin-top: 24px; }
+.auth-login-button { width: 100%; margin-top: 12px; min-height: 36px; }
+.auth-retry { display: block; margin: 12px auto 0; color: var(--color-brand-6); }
+.auth-development-login { display: grid; gap: 8px; margin-top: 16px; }
+.auth-development-login button { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.auth-alert, .modal-card p.auth-alert { padding: 8px 12px; margin: 12px 0; background: var(--color-brand-1); color: var(--color-text-1); border: 1px solid var(--color-brand-2); border-radius: 4px; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+.auth-alert.error, .modal-card p.auth-alert.error { background: var(--color-error-bg); color: var(--color-error); border-color: color-mix(in srgb, var(--color-error) 28%, var(--color-border)); }
+.auth-alert.warning, .modal-card p.auth-alert.warning { background: var(--color-warning-bg); color: var(--color-warning); border-color: color-mix(in srgb, var(--color-warning) 28%, var(--color-border)); }
+.auth-alert.success { color: var(--color-success); background: color-mix(in srgb, var(--color-success) 8%, var(--color-bg-base)); border-color: color-mix(in srgb, var(--color-success) 28%, var(--color-border)); }
+.auth-alert > button { margin-left: 12px; }
+.auth-account { position: relative; flex: 0 0 auto; }
+.auth-account-trigger { display: flex; align-items: center; gap: 6px; padding: 2px 7px; border-color: transparent; background: transparent; font-size: 12px; }
+.auth-account-name { max-width: 96px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.auth-avatar { width: 24px; height: 24px; display: inline-grid; place-items: center; border-radius: 50%; background: var(--color-fill-level-2); color: var(--color-text-2); font-size: 11px; }
+img.auth-avatar { object-fit: cover; }
+.auth-role { display: inline-flex; align-items: center; flex: 0 0 auto; padding: 1px 5px; border-radius: 2px; font-size: 11px; line-height: 18px; background: var(--color-fill-level-2); color: var(--color-text-2); }
+.auth-role.editor, .auth-role.admin { color: var(--color-brand-6); background: var(--color-brand-1); }
+.auth-account-menu { position: absolute; right: 0; top: calc(100% + 6px); width: 236px; z-index: 85; padding: 4px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-bg-base); box-shadow: var(--shadow-float); }
+.auth-account-detail { padding: 10px 8px; border-bottom: 1px solid var(--color-border); margin-bottom: 4px; display: flex; flex-direction: column; gap: 6px; }
+.auth-account-detail strong { font-size: 13px; }.auth-account-detail small { color: var(--color-text-3); font-size: 11px; overflow-wrap: anywhere; }
+.auth-account-menu [role="menuitem"] { display: block; width: 100%; min-height: 32px; padding: 7px 8px; border: none; background: transparent; border-radius: 4px; color: var(--color-text-1); text-align: left; font-size: 12px; text-decoration: none; }
+.auth-account-menu [role="menuitem"]:hover:not(:disabled), .auth-account-menu [role="menuitem"]:focus-visible { background: var(--color-brand-1); color: var(--color-brand-6); }
+.permission-banner-stack { display: flex; flex-direction: column; flex: 0 0 auto; }
+.permission-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; padding: 4px 16px; border-bottom: 1px solid var(--color-brand-2); background: var(--color-brand-1); color: var(--color-text-2); font-size: 12px; }
+.permission-banner > span { overflow-wrap: anywhere; }
+.permission-banner small { display: block; margin-top: 2px; color: var(--color-text-3); font-size: 11px; }
+.permission-banner.invitation { background: var(--color-warning-bg); color: var(--color-text-1); border-bottom-color: var(--color-border); }
+.permission-banner.auth-alert { margin: 0; border-radius: 0; }
+.access-modal-backdrop { z-index: 150; }
+.access-dialog { width: min(520px, 100%); max-height: calc(100dvh - 40px); overflow: auto; border-radius: 12px; }
+.access-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.access-dialog-heading h2 { font-size: 17px; }
+.access-dialog-heading .icon-button { border-color: transparent; background: transparent; }
+.access-dialog .field { margin-bottom: 12px; }
+.access-dialog .field input, .access-dialog .field select, .access-dialog .field textarea { font-size: 13px; }
+.access-dialog .modal-actions { margin-top: 20px; position: sticky; bottom: -20px; background: var(--color-bg-base); padding: 12px 0 0; }
+.access-field-hint { display: flex; justify-content: space-between; margin: -4px 0 16px; font-size: 11px; color: var(--color-text-3); }
+.access-drawer-backdrop { display: flex; justify-content: flex-end; padding: 0; }
+.access-drawer { height: 100%; max-height: 100%; border-radius: 0; width: min(480px, 100%); }
+.access-review-detail dl { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 12px; font-size: 13px; line-height: 1.55; }
+.access-review-detail dt { color: var(--color-text-3); }.access-review-detail dd { margin: 0; overflow-wrap: anywhere; }
+.access-request-reason { white-space: pre-wrap; }
+.access-page { height: 100%; overflow: auto; background: var(--color-bg-page); }
+.access-header { min-height: 48px; position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; padding: 8px 24px; border-bottom: 1px solid var(--color-border); background: var(--color-bg-base); }
+.access-separator { color: var(--color-text-3); }
+.access-main { max-width: 1440px; margin: 0 auto; padding: 24px; }
+.access-page-title { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.access-page-title h1 { font-size: 24px; margin: 0 0 8px; }.access-page-title p { font-size: 13px; color: var(--color-text-2); margin: 0; line-height: 1.6; }
+.access-page-title > a, .access-denied a { font-size: 13px; color: var(--color-brand-6); white-space: nowrap; }
+.access-tabs { display: flex; border-bottom: 1px solid var(--color-border); background: var(--color-bg-base); padding: 0 12px; }
+.access-tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 12px 16px; background: transparent; font-size: 13px; }
+.access-tabs button[aria-selected="true"] { border-bottom-color: var(--color-brand-5); color: var(--color-brand-6); font-weight: 700; }
+.access-count { background: var(--color-brand-1); border-radius: 12px; padding: 1px 5px; margin-left: 6px; font-size: 11px; }
+.access-content { background: var(--color-bg-base); padding: 16px; border: 1px solid var(--color-border); border-top: 0; border-radius: 0 0 4px 4px; }
+.access-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.access-search { min-width: 160px; max-width: 320px; flex: 1; }.access-search input { height: 32px; width: 100%; padding: 4px 10px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-base); font-size: 12px; }
+.access-row-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }.access-row-actions button { white-space: nowrap; font-size: 12px; }
+.access-table-scroll { width: 100%; overflow-x: auto; }
+.access-table { border-collapse: collapse; width: 100%; min-width: 700px; font-size: 12px; text-align: left; }
+.access-table th { background: var(--color-fill-level-1); font-weight: 600; color: var(--color-text-2); white-space: nowrap; }
+.access-table th, .access-table td { padding: 10px 12px; border-bottom: 1px solid var(--color-border); vertical-align: middle; line-height: 1.6; }
+.access-table tbody tr:hover { background: var(--color-fill-level-1); }
+.access-table td { color: var(--color-text-1); }
+.access-identity { display: flex; flex-direction: column; gap: 2px; }.access-identity strong { font-weight: 600; }.access-identity small, .access-cell-note { display: block; color: var(--color-text-3); font-size: 11px; overflow-wrap: anywhere; max-width: 260px; }
+.access-self { color: var(--color-brand-6); font-size: 10px; }
+.access-reason-cell { min-width: 180px; max-width: 360px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.access-id-cell { max-width: 220px; overflow-wrap: anywhere; }
+.access-status { display: inline-block; padding: 1px 5px; border-radius: 2px; color: var(--color-text-2); background: var(--color-fill-level-2); font-size: 11px; white-space: nowrap; }
+.access-status.pending { background: var(--color-warning-bg); color: var(--color-warning); }.access-status.accepted, .access-status.approved { color: var(--color-success); }.access-status.declined, .access-status.rejected { color: var(--color-error); background: var(--color-error-bg); }
+.access-status.sent { color: var(--color-success); }.access-status.failed { color: var(--color-error); background: var(--color-error-bg); }.access-status.disabled { color: var(--color-warning); background: var(--color-warning-bg); }
+.auth-account-menu a:focus-visible, .access-page a:focus-visible, .access-table summary:focus-visible { outline: none; box-shadow: var(--focus); border-radius: 4px; }
+.access-dialog .modal-actions .danger-button { width: auto; }
+.access-table summary { cursor: pointer; color: var(--color-brand-6); white-space: nowrap; }.access-audit-detail { max-width: 360px; }.access-audit-detail dt { color: var(--color-text-3); margin-top: 8px; }.access-audit-detail dd { margin: 4px 0 0; overflow-wrap: anywhere; }.access-audit-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; margin: 0; }
+.access-list-footer { padding: 12px 0 0; color: var(--color-text-3); font-size: 11px; }
+.access-empty { min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--color-text-3); font-size: 13px; }
+.access-user-options { max-height: 180px; overflow: auto; border: 1px solid var(--color-border); border-radius: 4px; }
+.access-user-options label { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 7px 10px; cursor: pointer; border-bottom: 1px solid var(--color-border); font-size: 12px; }.access-user-options label:last-child { border-bottom: none; }.access-user-options label:has(input:checked) { background: var(--color-brand-1); }.access-user-options small { display: block; font-size: 11px; color: var(--color-text-3); margin-top: 2px; }
+.access-user-options p { padding: 12px; margin: 0; }
+.access-denied { padding: 48px 24px; text-align: center; }.access-denied h1 { font-size: 22px; }.access-denied p { color: var(--color-text-2); }
+@media (max-width: 720px) {
+  .access-main { padding: 16px 8px; }.access-header { padding: 8px 12px; }.access-page-title { align-items: flex-start; }.access-tabs { padding: 0; }.access-tabs button { padding: 10px 8px; flex: 1; }.access-content { padding: 12px; }.access-toolbar { align-items: stretch; flex-direction: column; }.access-search { max-width: none; }.permission-banner { flex-wrap: wrap; padding: 8px 12px; }.auth-account-name { max-width: 64px; }.auth-account-trigger { gap: 4px; }.auth-avatar { display: none; }
+}
