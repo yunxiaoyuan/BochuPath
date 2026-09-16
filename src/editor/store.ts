@@ -35,10 +35,12 @@ interface EditorState {
   history: HistoryState;
   message: string;
   loading: boolean;
+  writeAllowed: boolean;
   recoverableDraft: DraftRecord | null;
   load: (id: string, mode: EditorMode) => Promise<void>;
   execute: (label: string, command: DiagramCommand) => boolean;
   setMode: (mode: EditorMode) => void;
+  setWriteAllowed: (allowed: boolean, message?: string) => void;
   setTool: (tool: EditorTool) => void;
   select: (selection: Selection, additive?: boolean) => void;
   focusPathway: (id: string | null) => void;
@@ -46,6 +48,7 @@ interface EditorState {
   undo: () => void;
   redo: () => void;
   save: () => Promise<void>;
+  preserveDraft: (message?: string) => Promise<void>;
   recoverDraft: (recover: boolean) => Promise<void>;
   clearMessage: () => void;
 }
@@ -64,10 +67,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   history: createHistory(),
   message: "",
   loading: true,
+  writeAllowed: true,
   recoverableDraft: null,
   load: async (id, mode) => {
     clearTimeout(draftTimer);
-    set({ loading: true, mode, message: "" });
+    set({ loading: true, mode, writeAllowed: false, message: "" });
     try {
       const repository = getRepository();
       const diagram = await repository.get(id);
@@ -92,7 +96,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   execute: (label, command) => {
     const state = get();
-    if (state.mode !== "edit" || !state.diagram) return false;
+    if (state.mode !== "edit" || !state.writeAllowed || !state.diagram) return false;
     try {
       const before = state.diagram;
       const after = command(before);
@@ -130,8 +134,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       message: mode === "view" ? "已切换到查看模式" : "已切换到编辑模式",
     });
   },
+  setWriteAllowed: (writeAllowed, message) => set({
+    writeAllowed,
+    ...(message ? { message } : {}),
+  }),
   setTool: (tool) => {
     const state = get();
+    if (tool === "connectPathway" && (state.mode !== "edit" || !state.writeAllowed)) return;
     if (tool === "connectPathway")
       set({
         tool,
@@ -211,7 +220,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setPathwayDraft: (pathwayDraft) => set({ pathwayDraft }),
   undo: () => {
     const state = get();
-    if (state.mode !== "edit" || !state.diagram) return;
+    if (state.mode !== "edit" || !state.writeAllowed || !state.diagram) return;
     const result = undo(state.history, state.diagram);
     if (result) {
       const dirty =
@@ -229,7 +238,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   redo: () => {
     const state = get();
-    if (state.mode !== "edit" || !state.diagram) return;
+    if (state.mode !== "edit" || !state.writeAllowed || !state.diagram) return;
     const result = redo(state.history, state.diagram);
     if (result) {
       const dirty =
@@ -247,7 +256,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   save: async () => {
     const state = get();
-    if (!state.diagram || state.mode !== "edit") return;
+    if (!state.diagram || state.mode !== "edit" || !state.writeAllowed) return;
     const issues = validateDiagram(state.diagram);
     if (issues.length) {
       set({
@@ -277,6 +286,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       queueDraft(state.diagram, true, (draftError) =>
         set({ message: domainMessage(draftError), saveState: "saveError" }),
       );
+    }
+  },
+  preserveDraft: async (message = "本地草稿已保留") => {
+    const state = get();
+    if (!state.diagram || state.saveState === "clean") {
+      set({ message });
+      return;
+    }
+    clearTimeout(draftTimer);
+    try {
+      await getRepository().saveDraft(state.diagram);
+      set({ message });
+    } catch (error) {
+      set({ message: domainMessage(error), saveState: "saveError" });
     }
   },
   recoverDraft: async (recover) => {

@@ -1,8 +1,9 @@
 import { expect, test, type BrowserContext, type Route } from "@playwright/test";
 import { createDemoDiagram } from "../src/domain/seed";
 import type { BochuPathSharedState } from "../src/persistence/pagedrop";
+import type { EditLockState } from "../src/collaboration/edit-lock";
 
-test("PageDrop collaborators share saves and stale saves keep a local draft", async ({
+test("PageDrop gives one collaborator the edit lease and keeps others read-only", async ({
   browser,
 }) => {
   let sharedState: BochuPathSharedState = {
@@ -12,34 +13,39 @@ test("PageDrop collaborators share saves and stale saves keep a local draft", as
     lastMutationId: "seed_v1",
     diagrams: [createDemoDiagram()],
   };
+  let lockState = emptyLockState();
   const aliceContext = await browser.newContext();
   const bobContext = await browser.newContext();
-  await installSharedJsonRoute(aliceContext, () => sharedState, (next) => { sharedState = next; });
-  await installSharedJsonRoute(bobContext, () => sharedState, (next) => { sharedState = next; });
+  await installSharedJsonRoute(aliceContext, () => sharedState, (next) => { sharedState = next; }, {
+    editorName: "Alice",
+    getLocks: () => lockState,
+    setLocks: (next) => { lockState = next; },
+  });
+  await installSharedJsonRoute(bobContext, () => sharedState, (next) => { sharedState = next; }, {
+    editorName: "Bob",
+    getLocks: () => lockState,
+    setLocks: (next) => { lockState = next; },
+  });
   const alice = await aliceContext.newPage();
   const bob = await bobContext.newPage();
   const url = "/api/link/test/files/index.html#/diagrams/diagram_demo/edit";
 
-  await Promise.all([alice.goto(url), bob.goto(url)]);
+  await alice.goto(url);
+  await expect(alice.getByText(/你（Alice）正在编辑/)).toBeVisible();
+  await bob.goto(url);
   await expect(alice.getByText(/共享数据/)).toBeVisible();
-  await expect(bob.getByRole("treeitem", { name: "需求确认" })).toBeVisible();
+  await expect(bob.getByText(/Alice 正在编辑；当前仅可查看/)).toBeVisible();
+  await expect(bob.getByRole("button", { name: "编辑", exact: true })).toHaveAttribute("aria-pressed", "false");
 
   await alice.getByRole("treeitem", { name: "需求确认" }).click();
   await alice.getByLabel("节点名称").fill("Alice 已确认需求");
   await alice.getByRole("button", { name: "确定" }).click();
   await alice.getByRole("button", { name: "保存", exact: true }).click();
   await expect(alice.getByText("✓ 已保存")).toBeVisible();
-
-  await bob.getByRole("treeitem", { name: "需求确认" }).click();
-  await bob.getByLabel("节点名称").fill("Bob 的旧版本");
-  await bob.getByRole("button", { name: "确定" }).click();
-  await bob.getByRole("button", { name: "保存", exact: true }).click();
-  await expect(bob.getByText(/共享版本已更新/)).toBeVisible();
-  await bob.waitForTimeout(650);
-
-  await bob.reload();
-  await expect(bob.getByText("发现比上次保存更新的本地草稿。")).toBeVisible();
-  await bob.getByRole("button", { name: "放弃草稿" }).click();
+  await alice.getByRole("button", { name: "查看", exact: true }).click();
+  await expect(alice.getByText(/当前无人编辑/)).toBeVisible();
+  await bob.getByRole("button", { name: "编辑", exact: true }).click();
+  await expect(bob.getByText(/你（Bob）正在编辑/)).toBeVisible();
   await expect(bob.getByRole("treeitem", { name: "Alice 已确认需求" })).toBeVisible();
 
   await aliceContext.close();
@@ -64,6 +70,7 @@ test("PageDrop Inspector confirms layer, node and batch creation", async ({
     `<iframe title="PageDrop app" sandbox="allow-scripts allow-same-origin allow-popups" style="width:1400px;height:800px" src="${baseURL}/api/link/test/files/index.html#/diagrams/diagram_demo/edit"></iframe>`,
   );
   const app = page.frameLocator('iframe[title="PageDrop app"]');
+  await acceptSandboxEditorName(app, "回归测试员");
   const objectPanel = app.getByRole("complementary", { name: "对象面板" });
 
   await objectPanel.getByRole("button", { name: "＋ 层级" }).click();
@@ -134,6 +141,7 @@ test("PageDrop sandbox creates a runnable blank diagram", async ({
   await app.getByRole("button", { name: "创建", exact: true }).click();
 
   await expect(app.getByLabel("通路图画布")).toBeVisible();
+  await acceptSandboxEditorName(app, "回归测试员");
   await expect(app.getByText("Sandbox 空白图", { exact: true }).first()).toBeVisible();
   await expect.poll(() => sharedState.diagrams.some((diagram) => diagram.name === "Sandbox 空白图")).toBe(true);
 
@@ -181,6 +189,7 @@ test("PageDrop sandbox edits downward pathways and highlights complete node cont
     `<iframe title="PageDrop pathways" sandbox="allow-scripts allow-same-origin allow-popups" style="width:1400px;height:800px" src="${baseURL}/api/link/test/files/index.html#/diagrams/diagram_demo/edit"></iframe>`,
   );
   const app = page.frameLocator('iframe[title="PageDrop pathways"]');
+  await acceptSandboxEditorName(app, "回归测试员");
 
   const demand = app.locator('.react-flow__node-business[data-id="node_demand"]');
   const demandAlt = app.locator('.react-flow__node-business[data-id="node_demand_alt"]');
@@ -257,7 +266,16 @@ async function installSharedJsonRoute(
   context: BrowserContext,
   getState: () => BochuPathSharedState,
   setState: (state: BochuPathSharedState) => void,
+  options: {
+    editorName?: string;
+    getLocks?: () => EditLockState;
+    setLocks?: (state: EditLockState) => void;
+  } = {},
 ): Promise<void> {
+  let localLocks = emptyLockState();
+  await context.addInitScript(({ name, key }) => {
+    try { window.localStorage.setItem(key, name); } catch { /* PageDrop sandbox may deny storage. */ }
+  }, { name: options.editorName ?? "回归测试员", key: "bochupath:static-editor-name" });
   await context.route("**/api/link/test/files/bochupath-data.json", async (route: Route) => {
     if (route.request().method() === "PUT") {
       setState(route.request().postDataJSON() as BochuPathSharedState);
@@ -270,4 +288,39 @@ async function installSharedJsonRoute(
       body: JSON.stringify(getState()),
     });
   });
+  await context.route("**/api/link/test/files/bochupath-locks.json", async (route: Route) => {
+    if (route.request().method() === "PUT") {
+      const next = route.request().postDataJSON() as EditLockState;
+      if (options.setLocks) options.setLocks(next);
+      else localLocks = next;
+      await route.fulfill({ status: 200, contentType: "application/json", body: "true" });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(options.getLocks ? options.getLocks() : localLocks),
+    });
+  });
+}
+
+function emptyLockState(): EditLockState {
+  return {
+    schemaVersion: "1.0",
+    revision: 0,
+    updatedAt: "2026-09-16T00:00:00.000Z",
+    lastMutationId: "initial",
+    locks: {},
+  };
+}
+
+async function acceptSandboxEditorName(
+  app: import("@playwright/test").FrameLocator,
+  name: string,
+): Promise<void> {
+  const dialog = app.getByRole("dialog", { name: "填写编辑标识" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel(/姓名或常用称呼/).fill(name);
+  await dialog.getByRole("button", { name: "继续" }).click();
+  await expect(app.getByText(new RegExp(`你（${name}）正在编辑`))).toBeVisible();
 }

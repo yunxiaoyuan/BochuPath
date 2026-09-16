@@ -7,6 +7,7 @@ import type { DiagramSummary } from '../../domain/types';
 import { renameDiagram } from '../../editor/commands';
 import { getRepository } from '../../persistence/get-repository';
 import { parseImportedJson } from '../../persistence/exchange';
+import { getEditLockRepository } from '../../collaboration/edit-lock';
 
 interface Props { theme: 'light' | 'dark'; onTheme: () => void }
 export function GalleryPage({ theme, onTheme }: Props) {
@@ -26,8 +27,20 @@ export function GalleryPage({ theme, onTheme }: Props) {
   const openCreate = () => { setNewName('未命名通路图'); setCreateOpen(true); };
   const create = async () => { const name = newName.trim(); if (!name) { setMessage('请输入通路图名称'); return; } try { const diagram = await getRepository().create({ name }); setCreateOpen(false); navigate(`/diagrams/${diagram.id}/edit`); } catch { setMessage('新建失败，请检查共享数据连接或浏览器存储'); } };
   const duplicate = async (item: DiagramSummary) => { const name = (await dialog.prompt({ title: '复制通路图', label: '副本名称', defaultValue: `${item.name} 副本`, confirmLabel: '复制' }))?.trim(); if (!name) return; try { await getRepository().duplicate(item.id, name); await refresh(); setMessage('复制成功'); } catch { setMessage('复制失败'); } };
-  const remove = async (item: DiagramSummary) => { if (!await dialog.confirm({ title: '删除通路图', message: `删除“${item.name}”？此操作不可撤销。`, confirmLabel: '删除', destructive: true })) return; try { await getRepository().delete(item.id); await refresh(); setMessage('已删除通路图'); } catch { setMessage('删除失败；图库至少需要保留一张图'); } };
-  const rename = async (item: DiagramSummary) => { const name = (await dialog.prompt({ title: '重命名通路图', label: '新名称', defaultValue: item.name, confirmLabel: '重命名' }))?.trim(); if (!name || name === item.name) return; try { const diagram = await getRepository().get(item.id); await getRepository().save(renameDiagram(diagram, { name, description: diagram.description }), item.revision); await refresh(); setMessage('重命名成功'); } catch { setMessage('重命名失败'); } };
+  const remove = async (item: DiagramSummary) => { if (!await canMutate(item, '删除')) return; if (!await dialog.confirm({ title: '删除通路图', message: `删除“${item.name}”？此操作不可撤销。`, confirmLabel: '删除', destructive: true })) return; try { await getRepository().delete(item.id); await refresh(); setMessage('已删除通路图'); } catch { setMessage('删除失败；图库至少需要保留一张图'); } };
+  const rename = async (item: DiagramSummary) => { if (!await canMutate(item, '重命名')) return; const name = (await dialog.prompt({ title: '重命名通路图', label: '新名称', defaultValue: item.name, confirmLabel: '重命名' }))?.trim(); if (!name || name === item.name) return; try { const diagram = await getRepository().get(item.id); await getRepository().save(renameDiagram(diagram, { name, description: diagram.description }), item.revision); await refresh(); setMessage('重命名成功'); } catch { setMessage('重命名失败'); } };
+  const canMutate = async (item: DiagramSummary, action: string) => {
+    if (!shared) return true;
+    try {
+      const lock = await getEditLockRepository().observe(item.id);
+      if (!lock) return true;
+      setMessage(`${lock.editorName} 正在编辑“${item.name}”，暂时不能${action}`);
+      return false;
+    } catch {
+      setMessage(`无法确认“${item.name}”的编辑状态，暂时不能${action}`);
+      return false;
+    }
+  };
   const importFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
     const file = input.files?.[0];
@@ -53,7 +66,7 @@ export function GalleryPage({ theme, onTheme }: Props) {
       <div className="header-actions"><button className="icon-button" onClick={onTheme} aria-label={`切换到${theme === 'light' ? '深色' : '浅色'}主题`} title="切换主题">{theme === 'light' ? '◐' : '○'}</button><button onClick={() => importInput.current?.click()} disabled={importing}>{importing ? '导入中…' : '导入 JSON'}</button><input ref={importInput} className="sr-only" type="file" accept="application/json,.json" aria-label="选择要导入的 JSON 文件" onChange={(event) => void importFile(event)} /><button className="primary-button" onClick={openCreate}>＋ 新建通路图</button></div>
     </header>
     <main className="gallery-main">
-      <section className="gallery-title"><div><p className="eyebrow">{pageDrop ? 'PAGEDROP 异步协作' : shared ? '本机共享 JSON' : '本机工作空间'}</p><h1>通路图库</h1><p>{shared ? '保存后写入共享数据；其他协作者刷新或重新聚焦页面即可读取最新版本。' : '创建、维护并重新打开结构化业务通路图。'}</p></div><label className="search-field"><span className="sr-only">搜索通路图</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索通路图" /></label></section>
+      <section className="gallery-title"><div><p className="eyebrow">{pageDrop ? 'PAGEDROP 静态协作发布版' : shared ? '本机共享 JSON · 软锁协作' : '本机工作空间'}</p><h1>通路图库</h1><p>{shared ? '同一张图同时只允许一人编辑；其他协作者保持查看，保存后读取共享版本。' : '创建、维护并重新打开结构化业务通路图。'}</p></div><label className="search-field"><span className="sr-only">搜索通路图</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索通路图" /></label></section>
       {message && <div className="message-bar" role="status">{message}<button className="quiet-button" onClick={() => setMessage('')}>关闭</button></div>}
       <section className="diagram-grid" aria-label="通路图列表">
         <button className="new-diagram-card" onClick={openCreate}><span>＋</span><strong>从空白图开始</strong><small>自动创建默认节点样式</small></button>

@@ -13,9 +13,11 @@ npm run dev
 
 Windows 用户也可以直接双击根目录的 `start.bat`：脚本会在缺少依赖时自动执行安装，启动开发服务器并打开图库页面。关闭开发服务器窗口即可停止服务。
 
-## 登录与权限规划
+## 发布分支与访问范围
 
-PageDrop 线上外链使用企业微信组织白名单作为入口门禁。当前静态版尚未实现安全的应用内读写角色隔离；V1.1 将采用“内部成员默认只读，管理员邀请、用户申请审批或管理员直接开通后获得写权限”，并要求服务器校验每一次写请求。完整方案见 [企业微信登录与权限设计](docs/access-permission-design.md)。
+当前 `release/pagedrop-static` 是 PageDrop 静态协作发布线：PageDrop 外层继续使用企业微信“柏楚”部门白名单，所有通过白名单进入页面的人都可以查看和申请编辑，不再区分应用内 Reader、Editor、Admin。带企业微信登录、申请/邀请/直开写权限和服务端写校验的安全版本位于 `master` 主线，完整方案见 [企业微信登录与权限设计](docs/access-permission-design.md)。
+
+静态发布线不把姓名描述为企微信息。首次进入编辑时，用户自行填写姓名或常用称呼，界面会持续提示该标识“由本人填写、非企业微信认证”。
 
 ## 验证
 
@@ -75,9 +77,13 @@ E2E 同时运行 `@axe-core/playwright` 的浅色/深色主题 WCAG 2 A/AA 自�
 
 ## PageDrop 可运行副本
 
-生产构建可以将 `dist/` 打包为包含 `index.html` 的 zip 后上传到 PageDrop。Vite 只在本地构建，PageDrop 只运行静态文件。构建产物使用相对资源路径；应用在 PageDrop 页面中自动切换为 Hash 路由，并通过 PageDrop JSON SDK 或带 `credentials: "include"` 的同外链相对请求读写 `bochupath-data.json`。多人可在不同浏览器中异步编辑：保存时递增 Diagram revision，其他协作者刷新、重新打开或回到图库后读取最新版本；基于旧 revision 的保存会被拒绝，本地草稿不会丢失。
+生产构建可以将 `dist/` 打包为包含 `index.html` 的 zip 后上传到 PageDrop。Vite 只在本地构建，PageDrop 只运行静态文件。构建产物使用相对资源路径；应用在 PageDrop 页面中自动切换为 Hash 路由，并通过 PageDrop JSON SDK 或带 `credentials: "include"` 的同外链相对请求读写 `bochupath-data.json`。
 
-PageDrop 的 JSON 覆盖写接口目前没有原子 compare-and-swap，因此这是异步协作而不是实时同屏协作。应避免两人同时在数秒内保存同一张图；更新 PageDrop 代码包时必须先下载线上 `bochupath-data.json`。Schema 不变时原样保留，Schema 升级时运行显式迁移并校验所有业务对象后再合包。本机开发通过 Vite 的同名 JSON 读写端点复现相同语义；嵌入环境限制浏览器存储时个人草稿降级到当前会话内存。
+多人可在不同浏览器中异步协作。进入某张图的编辑模式时，应用会把该图写入独立的 `bochupath-locks.json`：编辑会话每 15 秒续期，租约 60 秒后失效；租约有效期间其他用户只能查看，并能看到编辑者自行填写的姓名和最近活动时间。编辑者切换为查看或返回图库会主动释放；浏览器异常关闭时由超时释放。取得租约后会重新读取最新通路图，保存前也会再次核验租约；失锁或无法核验时立即转为只读，并先将未保存修改保留为当前浏览器的个人草稿。图库中的重命名和删除同样会避让活动租约。
+
+保存时递增 Diagram revision，其他协作者刷新、重新打开或回到图库后读取最新版本；基于旧 revision 的保存会被拒绝，本地草稿不会丢失。通路图事实数据只写入 `bochupath-data.json`，锁心跳不会改写它。
+
+PageDrop 的 JSON 覆盖写接口目前没有原子 compare-and-swap，因此软锁是降低误操作的协作约定，不是服务端强锁、实时同屏协作或安全权限系统；极短时间的竞争仍由保存 revision 冲突兜底。更新 PageDrop 代码包时必须先下载线上 `bochupath-data.json`。Schema 不变时原样保留，Schema 升级时运行显式迁移并校验所有业务对象后再合包。本机开发通过 Vite 的同名 JSON 读写端点复现相同语义；嵌入环境限制浏览器存储时，姓名和会话标识降级为本次打开期间的内存值，个人草稿降级到当前会话内存。
 
 线上 PageDrop iframe 权限为 `allow-scripts allow-same-origin allow-popups`。React、ES Module、DOM/SVG、React Flow、Pointer/Keyboard 事件、ResizeObserver 和 Hash 路由可用；沙箱没有 `allow-forms`、`allow-modals` 或 `allow-downloads`。因此所有表单都阻止原生导航并由 React 事件提交，确认和错误使用应用内组件，PageDrop 导出使用 JSON 文本和复制操作。应用不使用 Worker、Service Worker、父窗口 DOM、顶层跳转、全屏、Pointer Lock 或跨域接口。
 

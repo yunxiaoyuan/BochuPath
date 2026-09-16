@@ -80,8 +80,14 @@ button:hover:not(:disabled) { background: var(--color-fill-level-1); border-colo
 .global-header .header-actions { justify-content: flex-end; min-width: 0; }
 .save-indicator { white-space: nowrap; font-size: 12px; color: var(--color-text-2); }
 .save-indicator.dirty { color: var(--color-warning); }.save-indicator.saveError { color: var(--color-error); }.save-indicator.clean { color: var(--color-success); }
-.draft-banner { grid-row: 2; height: 40px; background: var(--color-warning-bg); color: var(--color-warning); border-bottom: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent); display: flex; align-items: center; justify-content: center; gap: 12px; font-size: 13px; }
-.draft-banner + .workspace-main { grid-row: 3; }.workspace-main { grid-row: 2 / 4; display: grid; grid-template-columns: 248px minmax(0, 1fr) 320px; min-height: 0; }
+.workspace-notices { grid-row: 2; display: grid; }
+.draft-banner { min-height: 40px; background: var(--color-warning-bg); color: var(--color-warning); border-bottom: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent); display: flex; align-items: center; justify-content: center; gap: 12px; padding: 6px 12px; font-size: 13px; }
+.collaboration-banner { min-height: 38px; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 6px 12px; border-bottom: 1px solid var(--color-border); background: var(--color-fill-level-1); color: var(--color-text-1); font-size: 12px; }
+.collaboration-banner small { color: var(--color-text-3); }
+.collaboration-banner.owned { background: color-mix(in srgb, #18a058 9%, var(--color-bg-base)); border-color: color-mix(in srgb, #18a058 28%, var(--color-border)); }
+.collaboration-banner.blocked, .collaboration-banner.error { background: var(--color-warning-bg); color: var(--color-warning); }
+.collaboration-banner .quiet-button { min-height: 26px; white-space: nowrap; }
+.workspace-main { grid-row: 3; display: grid; grid-template-columns: 248px minmax(0, 1fr) 320px; min-height: 0; }
 .workspace-main.left-closed { grid-template-columns: minmax(0, 1fr) 320px; }.workspace-main.right-closed { grid-template-columns: 248px minmax(0, 1fr); }.workspace-main.left-closed.right-closed { grid-template-columns: minmax(0, 1fr); }
 .status-bar { grid-row: 4; height: 28px; display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: center; gap: 12px; border-top: 1px solid var(--color-border); background: var(--color-bg-base); padding: 0 12px; color: var(--color-text-2); font-size: 11px; z-index: 20; }
 .status-bar span:nth-child(2) { text-align: center; }.status-bar span:last-child { text-align: right; }

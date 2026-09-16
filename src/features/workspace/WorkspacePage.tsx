@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAppDialog } from "../../app/AppDialog";
 import { isPageDropRuntime, usesSharedJsonRepository } from "../../app/runtime";
@@ -12,6 +12,13 @@ import { PathwayCanvas } from "./components/PathwayCanvas";
 import { Inspector } from "./components/Inspector";
 import { DiagramExportDialog } from "../diagrams/DiagramExportDialog";
 import { saveDiagramFile } from "../../persistence/exchange";
+import {
+  EDIT_LOCK_HEARTBEAT_MS,
+  EDITOR_NAME_STORAGE_KEY,
+  getEditLockRepository,
+  getEditorSessionId,
+  type DiagramEditLock,
+} from "../../collaboration/edit-lock";
 
 export type CreateKind =
   | "layer"
@@ -26,6 +33,12 @@ interface Props {
   onTheme: () => void;
 }
 
+type LockView =
+  | { phase: "disabled" | "checking" | "available" | "error" }
+  | { phase: "owned" | "blocked"; lock: DiagramEditLock };
+
+let memoryEditorName = "";
+
 export function WorkspacePage({ mode, theme, onTheme }: Props) {
   const { diagramId = "" } = useParams();
   const navigate = useNavigate();
@@ -37,11 +50,139 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
   const [exportOpen, setExportOpen] = useState(false);
   const [exportMessage, setExportMessage] = useState("");
   const shared = usesSharedJsonRepository();
+  const [lockView, setLockView] = useState<LockView>({ phase: shared ? "checking" : "disabled" });
+  const ownsLock = useRef(false);
+  const editorName = useRef("");
+  const sessionId = useRef(getEditorSessionId());
+
   useEffect(() => {
     const current = useEditorStore.getState();
-    if (current.diagram?.id === diagramId) current.setMode(mode);
-    else void current.load(diagramId, mode);
-  }, [diagramId, mode]);
+    if (current.diagram?.id === diagramId) current.setMode(shared ? "view" : mode);
+    else void current.load(diagramId, shared ? "view" : mode);
+    current.setWriteAllowed(!shared && mode === "edit");
+  }, [diagramId, mode, shared]);
+
+  const loseLock = useCallback(async (message: string) => {
+    ownsLock.current = false;
+    const current = useEditorStore.getState();
+    await current.preserveDraft(message);
+    current.setMode("view");
+    current.setWriteAllowed(false, message);
+    setLockView({ phase: "error" });
+    navigate(`/diagrams/${diagramId}/view`, { replace: true });
+  }, [diagramId, navigate]);
+
+  const releaseLock = useCallback(async () => {
+    if (!shared || !ownsLock.current) return;
+    ownsLock.current = false;
+    useEditorStore.getState().setWriteAllowed(false);
+    try {
+      await getEditLockRepository().release(diagramId, sessionId.current);
+    } catch {
+      // The 60-second expiry remains the fallback when unload/network interrupts release.
+    }
+  }, [diagramId, shared]);
+
+  const guardedSave = useCallback(async () => {
+    if (shared) {
+      try {
+        const valid = await getEditLockRepository().verify(diagramId, sessionId.current);
+        if (!valid) {
+          await loseLock("编辑权已经转移，本机修改已保存为个人草稿");
+          return;
+        }
+      } catch {
+        await loseLock("暂时无法确认编辑权，本机修改已保存为个人草稿");
+        return;
+      }
+    }
+    await useEditorStore.getState().save();
+  }, [diagramId, loseLock, shared]);
+
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const repository = getEditLockRepository();
+    const current = useEditorStore.getState();
+    ownsLock.current = false;
+
+    if (!shared) {
+      setLockView({ phase: "disabled" });
+      current.setMode(mode);
+      current.setWriteAllowed(mode === "edit");
+      return;
+    }
+
+    current.setMode("view");
+    current.setWriteAllowed(false);
+    setLockView({ phase: "checking" });
+
+    const observe = async () => {
+      try {
+        const lock = await repository.observe(diagramId);
+        if (!stopped) setLockView(lock ? { phase: "blocked", lock } : { phase: "available" });
+      } catch {
+        if (!stopped) setLockView({ phase: "error" });
+      }
+    };
+
+    const start = async () => {
+      await waitForDiagramLoad(diagramId);
+      if (stopped) return;
+      if (mode === "view") {
+        await observe();
+        timer = setInterval(() => void observe(), EDIT_LOCK_HEARTBEAT_MS);
+        return;
+      }
+
+      const name = await requireEditorName(dialog);
+      if (stopped) return;
+      if (!name) {
+        navigate(`/diagrams/${diagramId}/view`, { replace: true });
+        return;
+      }
+      editorName.current = name;
+      try {
+        const result = await repository.acquire(diagramId, sessionId.current, name);
+        if (stopped) return;
+        if (result.status === "blocked") {
+          setLockView({ phase: "blocked", lock: result.lock });
+          current.setWriteAllowed(false, `${result.lock.editorName} 正在编辑，当前仅可查看`);
+          navigate(`/diagrams/${diagramId}/view`, { replace: true });
+          return;
+        }
+        ownsLock.current = true;
+        setLockView({ phase: "owned", lock: result.lock });
+        await current.load(diagramId, "edit");
+        if (stopped) return;
+        current.setWriteAllowed(true, "已取得本图编辑权");
+        timer = setInterval(async () => {
+          try {
+            const renewed = await repository.renew(diagramId, sessionId.current, editorName.current);
+            if (stopped) return;
+            if (!renewed) await loseLock("编辑权已失效，本机修改已保存为个人草稿");
+            else setLockView({ phase: "owned", lock: renewed });
+          } catch {
+            if (!stopped) await loseLock("编辑权续期失败，本机修改已保存为个人草稿");
+          }
+        }, EDIT_LOCK_HEARTBEAT_MS);
+      } catch {
+        if (!stopped) {
+          setLockView({ phase: "error" });
+          current.setWriteAllowed(false, "无法取得编辑权，请检查连接后重试");
+          navigate(`/diagrams/${diagramId}/view`, { replace: true });
+        }
+      }
+    };
+    void start();
+
+    return () => {
+      stopped = true;
+      if (timer) clearInterval(timer);
+      if (ownsLock.current) void releaseLock();
+    };
+  }, [diagramId, dialog, loseLock, mode, navigate, releaseLock, shared]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const current = useEditorStore.getState();
@@ -54,7 +195,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
         event.key.toLocaleLowerCase() === "s"
       ) {
         event.preventDefault();
-        void current.save();
+        void guardedSave();
         return;
       }
       if (
@@ -122,7 +263,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
     return () => {
       window.removeEventListener("keydown", onKey);
     };
-  }, []);
+  }, [guardedSave]);
   const returnToGallery = async () => {
     if (
       (state.saveState === "dirty" || state.saveState === "saveError") &&
@@ -132,6 +273,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
         confirmLabel: "返回图库",
       })
     ) return;
+    await releaseLock();
     navigate("/diagrams");
   };
   const switchMode = async (next: EditorMode) => {
@@ -146,6 +288,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
       })
     )
       return;
+    if (next === "view") await releaseLock();
     navigate(`/diagrams/${diagramId}/${next}`);
   };
   if (state.loading)
@@ -175,6 +318,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
     ? `已高亮 ${highlightContext.visiblePathways.length} 条可见通路、${highlightContext.relatedNodeIds.size} 个关联节点${highlightContext.hiddenPathways.length ? `；另有 ${highlightContext.hiddenPathways.length} 条隐藏通路` : ""}`
     : "";
   const issueCount = 0;
+  const effectiveMode: EditorMode = mode === "edit" && (!shared || lockView.phase === "owned") ? "edit" : "view";
   return (
     <div className="workspace-shell">
       <a className="skip-link" href="#canvas-region">
@@ -198,20 +342,20 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
         </div>
         <div className="mode-segment" role="group" aria-label="工作模式">
           <button
-            aria-pressed={mode === "view"}
+            aria-pressed={effectiveMode === "view"}
             onClick={() => void switchMode("view")}
           >
             查看
           </button>
           <button
-            aria-pressed={mode === "edit"}
+            aria-pressed={effectiveMode === "edit"}
             onClick={() => void switchMode("edit")}
           >
             编辑
           </button>
         </div>
         <div className="header-actions">
-          {mode === "edit" && (
+          {effectiveMode === "edit" && (
             <>
               <button
                 className="icon-button"
@@ -239,7 +383,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
                 disabled={
                   state.saveState === "clean" || state.saveState === "saving"
                 }
-                onClick={() => void state.save()}
+                onClick={() => void guardedSave()}
               >
                 {state.saveState === "saving" ? "保存中…" : "保存"}
               </button>
@@ -276,26 +420,28 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
           </button>
         </div>
       </header>
-      {state.recoverableDraft && (
-        <div className="draft-banner" role="alert">
-          <span>发现比上次保存更新的本地草稿。</span>
-          <button
-            className="primary-button small"
-            onClick={() => void state.recoverDraft(true)}
-          >
-            恢复草稿
-          </button>
-          <button onClick={() => void state.recoverDraft(false)}>
-            放弃草稿
-          </button>
-        </div>
-      )}
+      {(shared || state.recoverableDraft) && <div className="workspace-notices">
+        {shared && <CollaborationBanner
+          view={lockView}
+          name={editorName.current || readEditorName()}
+          onChangeName={() => void changeEditorName()}
+        />}
+        {state.recoverableDraft && (
+          <div className="draft-banner" role="alert">
+            <span>{effectiveMode === "edit" ? "发现比上次保存更新的本地草稿。" : "本机有未恢复的个人草稿；取得编辑权后可以恢复。"}</span>
+            {effectiveMode === "edit" && <>
+              <button className="primary-button small" onClick={() => void state.recoverDraft(true)}>恢复草稿</button>
+              <button onClick={() => void state.recoverDraft(false)}>放弃草稿</button>
+            </>}
+          </div>
+        )}
+      </div>}
       <main
         className={`workspace-main ${leftOpen ? "" : "left-closed"} ${rightOpen ? "" : "right-closed"}`}
       >
         {leftOpen && (
           <ObjectPanel
-            mode={mode}
+            mode={effectiveMode}
             onCreate={(kind) => {
               if (kind === "pathway") {
                 setCreateKind(null);
@@ -305,10 +451,10 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
             onClose={() => setLeftOpen(false)}
           />
         )}
-        <PathwayCanvas mode={mode} onCreateNode={() => setCreateKind("node")} />
+        <PathwayCanvas mode={effectiveMode} onCreateNode={() => setCreateKind("node")} />
         {rightOpen && (
           <Inspector
-            mode={mode}
+            mode={effectiveMode}
             createKind={createKind}
             onCreateHandled={() => setCreateKind(null)}
             onClose={() => setRightOpen(false)}
@@ -317,7 +463,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
       </main>
       <footer className="status-bar" aria-label="状态栏">
         <span>
-          {mode === "edit" ? "编辑模式" : "查看模式"} ·{" "}
+          {effectiveMode === "edit" ? "编辑模式" : "查看模式"} ·{" "}
           {state.multiSelectedNodeIds.length
             ? `已选择 ${state.multiSelectedNodeIds.length} 个节点`
             : "未选择节点"}
@@ -353,6 +499,109 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
       setExportMessage("导出失败，请稍后重试");
     }
   }
+
+  async function changeEditorName() {
+    const name = await promptEditorName(dialog, editorName.current || readEditorName());
+    if (!name) return;
+    writeEditorName(name);
+    editorName.current = name;
+    if (lockView.phase !== "owned") {
+      setLockView({ ...lockView });
+      return;
+    }
+    try {
+      const renewed = await getEditLockRepository().renew(diagramId, sessionId.current, name);
+      if (!renewed) await loseLock("编辑权已失效，本机修改已保存为个人草稿");
+      else setLockView({ phase: "owned", lock: renewed });
+    } catch {
+      await loseLock("姓名更新时无法确认编辑权，本机修改已保存为个人草稿");
+    }
+  }
+}
+
+function CollaborationBanner({ view, name, onChangeName }: {
+  view: LockView;
+  name: string;
+  onChangeName: () => void;
+}) {
+  let message = "正在检查本图的编辑状态…";
+  let tone = "checking";
+  if (view.phase === "available") {
+    message = "当前无人编辑；进入编辑模式后，本图会为你保留 60 秒并自动续期。";
+    tone = "available";
+  } else if (view.phase === "owned") {
+    message = `你（${view.lock.editorName}）正在编辑；其他协作者目前只能查看。`;
+    tone = "owned";
+  } else if (view.phase === "blocked") {
+    message = `${view.lock.editorName} 正在编辑；当前仅可查看。最近活动：${formatActivity(view.lock.heartbeatAt)}。`;
+    tone = "blocked";
+  } else if (view.phase === "error") {
+    message = "暂时无法确认编辑状态，为保护共享数据，当前仅可查看。";
+    tone = "error";
+  }
+  return <div className={`collaboration-banner ${tone}`} role="status">
+    <span>{message}</span>
+    <small>姓名由协作者本人填写，非企业微信认证身份。</small>
+    <button className="quiet-button" onClick={onChangeName}>{name ? `我的标识：${name}` : "填写我的标识"}</button>
+  </div>;
+}
+
+async function requireEditorName(dialog: ReturnType<typeof useAppDialog>): Promise<string | null> {
+  const existing = readEditorName();
+  if (existing) return existing;
+  return promptEditorName(dialog, "");
+}
+
+async function promptEditorName(dialog: ReturnType<typeof useAppDialog>, defaultValue: string): Promise<string | null> {
+  const value = await dialog.prompt({
+    title: "填写编辑标识",
+    message: "其他协作者会看到这个名字。它由你本人填写，不代表企业微信已认证。",
+    label: "姓名或常用称呼（1–20 个字符）",
+    defaultValue,
+    confirmLabel: "继续",
+  });
+  const name = value?.trim();
+  if (!name) return null;
+  const normalized = [...name].slice(0, 20).join("");
+  writeEditorName(normalized);
+  return normalized;
+}
+
+function readEditorName(): string {
+  try {
+    return window.localStorage.getItem(EDITOR_NAME_STORAGE_KEY)?.trim() || memoryEditorName;
+  } catch {
+    return memoryEditorName;
+  }
+}
+
+function writeEditorName(name: string): void {
+  memoryEditorName = name;
+  try {
+    window.localStorage.setItem(EDITOR_NAME_STORAGE_KEY, name);
+  } catch {
+    // Sandboxed browsers may deny persistent storage; the in-memory ref still works for this visit.
+  }
+}
+
+function formatActivity(timestamp: string): string {
+  const elapsed = Math.max(0, Date.now() - new Date(timestamp).getTime());
+  if (elapsed < 10_000) return "刚刚";
+  if (elapsed < 60_000) return `${Math.floor(elapsed / 1000)} 秒前`;
+  return new Date(timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+}
+
+function waitForDiagramLoad(diagramId: string): Promise<void> {
+  const current = useEditorStore.getState();
+  if (!current.loading && current.diagram?.id === diagramId) return Promise.resolve();
+  return new Promise((resolve) => {
+    const unsubscribe = useEditorStore.subscribe((next) => {
+      if (!next.loading && next.diagram?.id === diagramId) {
+        unsubscribe();
+        resolve();
+      }
+    });
+  });
 }
 
 function saveText(state: string): string {

@@ -8,12 +8,13 @@ function bochuPathLocalData(): Plugin {
   const runtimeDirectory = process.env.BOCHUPATH_DATA_DIRECTORY
     ? resolve(process.env.BOCHUPATH_DATA_DIRECTORY)
     : resolve(process.cwd(), '.bochupath');
-  const runtimeFile = resolve(runtimeDirectory, 'bochupath-data.json');
-  const seedFile = resolve(process.cwd(), 'public', 'bochupath-data.json');
-  const ensureRuntimeFile = () => {
-    if (existsSync(runtimeFile)) return;
+  const runtimeFile = (name: string) => resolve(runtimeDirectory, name);
+  const seedFile = (name: string) => resolve(process.cwd(), 'public', name);
+  const ensureRuntimeFile = (name: string) => {
+    const target = runtimeFile(name);
+    if (existsSync(target)) return;
     mkdirSync(runtimeDirectory, { recursive: true });
-    writeFileSync(runtimeFile, readFileSync(seedFile, 'utf8'), 'utf8');
+    writeFileSync(target, readFileSync(seedFile(name), 'utf8'), 'utf8');
   };
 
   return {
@@ -21,16 +22,18 @@ function bochuPathLocalData(): Plugin {
     apply: 'serve',
     configureServer(server) {
       server.middlewares.use((request, response, next) => {
-        if (request.url?.split('?')[0] !== '/bochupath-data.json') {
+        const name = request.url?.split('?')[0]?.slice(1);
+        if (name !== 'bochupath-data.json' && name !== 'bochupath-locks.json') {
           next();
           return;
         }
-        ensureRuntimeFile();
+        ensureRuntimeFile(name);
+        const target = runtimeFile(name);
         if (request.method === 'GET') {
           response.statusCode = 200;
           response.setHeader('Content-Type', 'application/json; charset=utf-8');
           response.setHeader('Cache-Control', 'no-store');
-          response.end(readFileSync(runtimeFile, 'utf8'));
+          response.end(readFileSync(target, 'utf8'));
           return;
         }
         if (request.method !== 'PUT') {
@@ -48,10 +51,17 @@ function bochuPathLocalData(): Plugin {
         request.on('end', () => {
           try {
             const input = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
-            if ((input.schemaVersion !== '1.0' && input.schemaVersion !== '1.1') || !Array.isArray(input.diagrams)) {
+            const validDiagramState = name === 'bochupath-data.json'
+              && (input.schemaVersion === '1.0' || input.schemaVersion === '1.1')
+              && Array.isArray(input.diagrams);
+            const validLockState = name === 'bochupath-locks.json'
+              && input.schemaVersion === '1.0'
+              && typeof input.locks === 'object'
+              && input.locks !== null;
+            if (!validDiagramState && !validLockState) {
               throw new Error('Invalid BochuPath shared state');
             }
-            writeFileSync(runtimeFile, `${JSON.stringify(input, null, 2)}\n`, 'utf8');
+            writeFileSync(target, `${JSON.stringify(input, null, 2)}\n`, 'utf8');
             response.statusCode = 200;
             response.setHeader('Content-Type', 'application/json; charset=utf-8');
             response.end('true');
