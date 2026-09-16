@@ -25,9 +25,15 @@ import type {
   NodeStyle,
   Pathway,
 } from "../../../domain/types";
+import {
+  pathwayDashArray,
+  shapeContentInsets,
+  shapeContentWidth,
+} from "../../../domain/node-shapes";
 import { descendantIds, sortStable } from "../../../domain/rules";
 import {
   orderedDiagramNodes,
+  pathwayEdgeCount,
   pathwayLayerGroups,
   sortPathwayNodeIds,
 } from "../../../domain/layer-order";
@@ -53,6 +59,7 @@ import {
   type LayoutBusinessNode,
   type Rect,
 } from "../../../layout/swimlane-layout";
+import { NodeShape } from "./NodeShape";
 
 interface Props {
   mode: EditorMode;
@@ -71,6 +78,9 @@ interface BusinessData extends Record<string, unknown> {
   fontSize: number;
   descriptionFontSize: number;
   compactTitle: boolean;
+  width: number;
+  height: number;
+  contentInsets: { top: number; right: number; bottom: number; left: number };
   canReorder: boolean;
   reorderAxis: "横向" | "纵向";
 }
@@ -167,8 +177,8 @@ function CanvasInner({ mode, onCreateNode, isFullscreen, onToggleFullscreen }: P
     [diagram, multiSelectedNodeIds.length, selection],
   );
   const relatedPathwayIds = useMemo(
-    () => new Set(selectedNodeContext?.visiblePathways.map((pathway) => pathway.id)),
-    [selectedNodeContext],
+    () => new Set(focused ? [] : selectedNodeContext?.visiblePathways.map((pathway) => pathway.id)),
+    [focused, selectedNodeContext],
   );
   const draftCandidateIds = useMemo(
     () => new Set(
@@ -261,11 +271,12 @@ function CanvasInner({ mode, onCreateNode, isFullscreen, onToggleFullscreen }: P
       const pathwayMember = focusedIds.has(node.id);
       const draftMember = draft?.nodeIds.includes(node.id) ?? false;
       const editingFocusedPathway =
-        mode === "edit" && tool === "select" && selection?.kind === "pathway";
+        mode === "edit" && tool === "select" && Boolean(focusedPath);
       const candidate =
         draftCandidateIds.has(node.id) ||
         (editingFocusedPathway && !pathwayMember);
       const related = Boolean(
+        !focusedPath &&
         selectedNodeContext?.relatedNodeIds.has(node.id) &&
         selection?.kind === "node" &&
         selection.id !== node.id,
@@ -286,7 +297,7 @@ function CanvasInner({ mode, onCreateNode, isFullscreen, onToggleFullscreen }: P
         selected:
           multiSelectedNodeIds.includes(node.id) || draftMember,
         ariaRole: "button",
-        ariaLabel: `${node.name}，位于 ${fullLayerPath(diagram, node.layerId)}，参与 ${participationCount} 条通路${draftMember ? "，Shift+空格从新通路移除" : draft ? "，空格加入新通路" : selection?.kind === "pathway" && mode === "edit" ? pathwayMember ? "，Shift+空格从当前通路移除" : "，Shift+空格加入当前通路" : ""}`,
+        ariaLabel: `${node.name}，位于 ${fullLayerPath(diagram, node.layerId)}，参与 ${participationCount} 条通路${draftMember ? "，Shift+空格从新通路移除" : draft ? "，空格加入新通路" : focusedPath && mode === "edit" ? pathwayMember ? "，Shift+空格从活动通路移除" : "，Shift+空格加入活动通路" : ""}`,
         data: {
           kind: "business",
           node,
@@ -301,7 +312,11 @@ function CanvasInner({ mode, onCreateNode, isFullscreen, onToggleFullscreen }: P
             node.name,
             rect.width,
             diagram.layout.fontSize,
+            style.shape,
           ),
+          width: rect.width,
+          height: rect.height,
+          contentInsets: shapeContentInsets(style.shape, rect.width),
           canReorder,
           reorderAxis: diagram.layout.direction === "TB" ? "横向" : "纵向",
         },
@@ -360,7 +375,7 @@ function CanvasInner({ mode, onCreateNode, isFullscreen, onToggleFullscreen }: P
         style: {
           stroke,
           strokeWidth: emphasized ? 2.6 : 1.15,
-          strokeDasharray: edge.lineStyle === "dashed" ? "7 5" : undefined,
+          strokeDasharray: pathwayDashArray(edge.lineStyle),
           strokeLinecap: "round",
           strokeLinejoin: "round",
           opacity: emphasized ? 0.96 : 0.56,
@@ -415,7 +430,7 @@ function CanvasInner({ mode, onCreateNode, isFullscreen, onToggleFullscreen }: P
           style: {
             stroke: draftPathway.color,
             strokeWidth: 2.4,
-            strokeDasharray: "6 5",
+            strokeDasharray: pathwayDashArray(draftPathway.lineStyle) ?? "6 5",
             strokeLinecap: "round",
             strokeLinejoin: "round",
           },
@@ -506,10 +521,10 @@ function CanvasInner({ mode, onCreateNode, isFullscreen, onToggleFullscreen }: P
       node.data.kind === "business" &&
       mode === "edit" &&
       tool === "select" &&
-      selection?.kind === "pathway" &&
-      event.shiftKey
+      event.shiftKey &&
+      focusedPath
     ) {
-      const pathway = diagram.pathways.find((item) => item.id === selection.id);
+      const pathway = focusedPath;
       if (!pathway) return;
       const included = pathway.nodeIds.includes(node.id);
       execute(
@@ -713,9 +728,9 @@ function CanvasInner({ mode, onCreateNode, isFullscreen, onToggleFullscreen }: P
         event.shiftKey &&
         mode === "edit" &&
         tool === "select" &&
-        selection?.kind === "pathway"
+        focusedPath
       ) {
-        const pathway = diagram.pathways.find((item) => item.id === selection.id);
+        const pathway = focusedPath;
         if (!pathway) return;
         const included = pathway.nodeIds.includes(node.id);
         execute(
@@ -839,6 +854,15 @@ function CanvasInner({ mode, onCreateNode, isFullscreen, onToggleFullscreen }: P
           <button onClick={() => setTool("select")}>取消</button>
         </div>
       )}
+      {focusedPath && tool !== "connectPathway" && (
+        <div className="active-pathway-bar" role="status">
+          <i style={{ background: focusedPath.color }} aria-hidden="true" />
+          <strong>{mode === "edit" ? "正在编辑通路" : "已高亮通路"}：{focusedPath.name}</strong>
+          <span>{focusedPath.nodeIds.length} 节点 · {pathwayEdgeCount(diagram, focusedPath.nodeIds)} 边</span>
+          {mode === "edit" && <span>Shift+点击或 Shift+空格增删节点</span>}
+          <button onClick={() => focusPathway(null)}>{mode === "edit" ? "退出编辑" : "取消高亮"}</button>
+        </div>
+      )}
       <div
         ref={stageRef}
         className="flow-wrap"
@@ -938,15 +962,9 @@ const BusinessNode = memo(({ data, selected }: NodeProps<BusinessFlowNode>) => (
   <div
     className={`business-node ${data.canReorder ? "reorderable" : ""} ${selected ? "selected" : ""} ${data.pathwayMember ? "pathway-member" : ""} ${data.related ? "related" : ""} ${data.candidate ? "candidate" : ""}`}
     title={data.canReorder ? `${data.reorderAxis}拖动可调整同层节点顺序` : undefined}
-    style={{
-      background: data.style.fillColor,
-      borderColor: data.style.borderColor,
-      borderStyle: data.style.borderStyle,
-      borderWidth: data.style.borderWidth,
-      borderRadius: data.style.shape === "rect" ? 0 : data.style.borderRadius,
-      color: data.style.textColor,
-    }}
+    style={{ color: data.style.textColor }}
   >
+    <NodeShape style={data.style} width={data.width} height={data.height} />
     <Handle id="top" type="target" position={Position.Top} />
     <Handle id="left" type="target" position={Position.Left} />
     {(data.pathwayMember || data.draftMember) && (
@@ -954,24 +972,26 @@ const BusinessNode = memo(({ data, selected }: NodeProps<BusinessFlowNode>) => (
         ✓
       </b>
     )}
-    <strong
-      className={data.compactTitle ? "compact-title" : undefined}
-      style={{
-        fontSize: data.compactTitle
-          ? Math.max(11, data.fontSize - 1)
-          : data.fontSize,
-        lineHeight: data.compactTitle ? 1.15 : 1.35,
-      }}
-    >
-      {data.node.name}
-    </strong>
-    {data.node.decompositionItems.length > 0 && (
-      <ul style={{ fontSize: data.descriptionFontSize }}>
-        {data.node.decompositionItems.map((item, index) => (
-          <li key={`${item}-${index}`}>{item}</li>
-        ))}
-      </ul>
-    )}
+    <div className="business-node-content" style={{ padding: `${data.contentInsets.top}px ${data.contentInsets.right}px ${data.contentInsets.bottom}px ${data.contentInsets.left}px` }}>
+      <strong
+        className={data.compactTitle ? "compact-title" : undefined}
+        style={{
+          fontSize: data.compactTitle
+            ? Math.max(11, data.fontSize - 1)
+            : data.fontSize,
+          lineHeight: data.compactTitle ? 1.15 : 1.35,
+        }}
+      >
+        {data.node.name}
+      </strong>
+      {data.node.decompositionItems.length > 0 && (
+        <ul style={{ fontSize: data.descriptionFontSize }}>
+          {data.node.decompositionItems.map((item, index) => (
+            <li key={`${item}-${index}`}>{item}</li>
+          ))}
+        </ul>
+      )}
+    </div>
     <Handle id="bottom" type="source" position={Position.Bottom} />
     <Handle id="right" type="source" position={Position.Right} />
   </div>
@@ -1016,8 +1036,9 @@ function titleNeedsCompactTypography(
   text: string,
   nodeWidth: number,
   fontSize: number,
+  shape: NodeStyle["shape"],
 ): boolean {
-  const contentWidth = Math.max(32, nodeWidth - 16);
+  const contentWidth = shapeContentWidth(shape, nodeWidth);
   const estimatedWidth = [...text].reduce(
     (total, character) =>
       total + fontSize * (/^[\u0000-\u00ff]$/.test(character) ? 0.58 : 1),

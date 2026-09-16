@@ -20,6 +20,11 @@ import type {
   Selection,
 } from "../../../domain/types";
 import {
+  nodeShapeLabel,
+  nodeShapeOptions,
+  pathwayLineStyleLabel,
+} from "../../../domain/node-shapes";
+import {
   descendantIds,
   isLeafLayer,
   validateDiagram,
@@ -59,6 +64,7 @@ import {
 import { parseBatchNames } from "../../../editor/batch-input";
 import { useEditorStore } from "../../../editor/store";
 import type { CreateKind } from "../WorkspacePage";
+import { NodeShape } from "./NodeShape";
 
 interface Props {
   mode: EditorMode;
@@ -960,7 +966,7 @@ function StyleForm({
         <StylePreview form={form} />
         <Detail label="样式名称" value={style.name} />
         <Detail label="引用节点" value={`${refs} 个`} />
-        <Detail label="形状" value={style.shape} />
+        <Detail label="形状" value={nodeShapeLabel(style.shape)} />
         <Detail
           label="边框"
           value={`${style.borderWidth}px ${style.borderStyle}`}
@@ -1047,9 +1053,9 @@ function StyleForm({
           disabled={readOnly}
           onChange={(e) => patch("shape", e.target.value as NodeStyle["shape"])}
         >
-          <option value="rect">直角矩形</option>
-          <option value="roundedRect">圆角矩形</option>
-          <option value="document">文档</option>
+          {nodeShapeOptions.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
         </select>
       </Field>
       <div className="field-grid">
@@ -1090,6 +1096,7 @@ function StyleForm({
             <option value="solid">实线</option>
             <option value="dashed">虚线</option>
             <option value="dotted">点线</option>
+            <option value="dashDot">点划线（— · — ·）</option>
           </select>
         </Field>
         <Field label="边框宽度">
@@ -1175,7 +1182,7 @@ function PathwayForm({
   const execute = useEditorStore((s) => s.execute);
   const select = useEditorStore((s) => s.select);
   const dialog = useAppDialog();
-  const [name, setName] = useState(pathway?.name ?? "");
+  const [name, setName] = useState(pathway?.name ?? nextPathwayName(diagram));
   const nodeIds = pathway?.nodeIds ?? [];
   const occupiedLayerCount = pathwayLayerGroups(diagram, nodeIds).length;
   const [color, setColor] = useState(pathway?.color ?? "#2F64F7");
@@ -1189,10 +1196,7 @@ function PathwayForm({
       <div className="detail-stack">
         <Detail label="通路名称" value={pathway.name} />
         <PathwayGraphSummary nodeIds={pathway.nodeIds} />
-        <Detail
-          label="线型"
-          value={pathway.lineStyle === "solid" ? "实线" : "虚线"}
-        />
+        <Detail label="线型" value={pathwayLineStyleLabel(pathway.lineStyle)} />
         <Detail label="备注" value={pathway.description || "暂无"} />
       </div>
     );
@@ -1224,7 +1228,7 @@ function PathwayForm({
       onDone();
       return;
     }
-    setName(pathway?.name ?? "");
+    setName(pathway?.name ?? nextPathwayName(diagram));
     setColor(pathway?.color ?? "#2F64F7");
     setLineStyle(pathway?.lineStyle ?? "solid");
     setDescription(pathway?.description ?? "");
@@ -1255,7 +1259,7 @@ function PathwayForm({
         <PathwayGraphSummary nodeIds={nodeIds} />
         {pathway && (
           <div className="canvas-edit-entry">
-            <p>当前通路已可直接编辑：Shift+点击节点立即加入或移除；普通点击节点将退出通路编辑。</p>
+            <p>当前通路已可直接编辑：Shift+点击或 Shift+空格加入、移除节点；普通点击节点可查看属性，不会退出通路编辑。</p>
           </div>
         )}
       </Field>
@@ -1279,6 +1283,7 @@ function PathwayForm({
           >
             <option value="solid">实线</option>
             <option value="dashed">虚线</option>
+            <option value="dashDot">点划线（— · — ·）</option>
           </select>
         </Field>
       </div>
@@ -1366,6 +1371,7 @@ function DraftPathwayForm() {
           >
             <option value="solid">实线</option>
             <option value="dashed">虚线</option>
+            <option value="dashDot">点划线（— · — ·）</option>
           </select>
         </Field>
       </div>
@@ -1437,20 +1443,19 @@ function StylePreview({
 }) {
   return (
     <div className="style-preview">
-      <span
-        style={{
-          background: form.fillColor,
-          color: form.textColor,
-          borderColor: form.borderColor,
-          borderStyle: form.borderStyle,
-          borderWidth: form.borderWidth,
-          borderRadius: form.shape === "rect" ? 0 : form.borderRadius,
-        }}
-      >
-        {form.name || "样式预览"}
+      <span className="style-preview-node" style={{ color: form.textColor }}>
+        <NodeShape style={form} width={180} height={64} />
+        <b>{form.name || "样式预览"}</b>
       </span>
     </div>
   );
+}
+
+function nextPathwayName(diagram: Diagram): string {
+  const names = new Set(diagram.pathways.map((pathway) => pathway.name));
+  let index = 1;
+  while (names.has(`新通路 ${index}`)) index += 1;
+  return `新通路 ${index}`;
 }
 function Overview({
   diagramName,

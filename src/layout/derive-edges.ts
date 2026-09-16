@@ -4,7 +4,7 @@ import type { Diagram, Pathway } from '../domain/types';
 
 export interface RenderEdge {
   id: string; pathwayId: string; sourceNodeId: string; targetNodeId: string;
-  color: string; lineStyle: 'solid' | 'dashed'; parallelOffset: number;
+  color: string; lineStyle: Pathway['lineStyle']; parallelOffset: number;
 }
 
 export function derivePathwayEdges(

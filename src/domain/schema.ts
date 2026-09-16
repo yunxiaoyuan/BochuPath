@@ -18,15 +18,15 @@ export const diagramNodeSchema = z.object({
 
 export const nodeStyleSchema = z.object({
   id: z.string().min(1), name: z.string().trim().min(1).max(40),
-  shape: z.enum(['rect', 'roundedRect', 'document']), fillColor: color, borderColor: color,
-  borderStyle: z.enum(['solid', 'dashed', 'dotted']), borderWidth: z.union([z.literal(1), z.literal(2), z.literal(3)]),
+  shape: z.enum(['rect', 'roundedRect', 'document', 'ellipse', 'capsule', 'cylinder', 'note']), fillColor: color, borderColor: color,
+  borderStyle: z.enum(['solid', 'dashed', 'dotted', 'dashDot']), borderWidth: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   borderRadius: z.number().min(0).max(32), textColor: color, icon: z.string().optional(),
   isDefault: z.boolean(), isSystem: z.boolean(),
 });
 
 const pathwayBaseSchema = z.object({
   id: z.string().min(1), name: z.string().trim().min(1).max(80), description: z.string().optional(),
-  color, lineStyle: z.enum(['solid', 'dashed']), visible: z.boolean(), order: z.number().int(),
+  color, lineStyle: z.enum(['solid', 'dashed', 'dashDot']), visible: z.boolean(), order: z.number().int(),
 });
 
 export const pathwaySchema = pathwayBaseSchema.extend({
@@ -44,6 +44,13 @@ export const layoutSchema = z.object({
 });
 
 export const diagramSchema = z.object({
+  schemaVersion: z.literal('1.2'), id: z.string().min(1), name: z.string().trim().min(1).max(80),
+  description: z.string().optional(), revision: z.number().int().nonnegative(), layers: z.array(layerSchema),
+  nodes: z.array(diagramNodeSchema), nodeStyles: z.array(nodeStyleSchema), pathways: z.array(pathwaySchema),
+  layout: layoutSchema, createdAt: isoDate, updatedAt: isoDate,
+});
+
+const v11DiagramSchema = z.object({
   schemaVersion: z.literal('1.1'), id: z.string().min(1), name: z.string().trim().min(1).max(80),
   description: z.string().optional(), revision: z.number().int().nonnegative(), layers: z.array(layerSchema),
   nodes: z.array(diagramNodeSchema), nodeStyles: z.array(nodeStyleSchema), pathways: z.array(pathwaySchema),
@@ -66,7 +73,7 @@ export function migrateDiagram(input: unknown): Diagram {
     const legacy = legacyDiagramSchema.parse(input);
     parsed = diagramSchema.parse({
       ...legacy,
-      schemaVersion: '1.1',
+      schemaVersion: '1.2',
       pathways: legacy.pathways.map(({ steps, ...pathway }) => ({
         ...pathway,
         nodeIds: [...steps]
@@ -75,6 +82,8 @@ export function migrateDiagram(input: unknown): Diagram {
       })),
     });
   } else if (version === '1.1') {
+    parsed = diagramSchema.parse({ ...v11DiagramSchema.parse(input), schemaVersion: '1.2' });
+  } else if (version === '1.2') {
     parsed = diagramSchema.parse(input);
   } else {
     throw new Error('SCHEMA_VERSION_UNSUPPORTED');

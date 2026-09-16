@@ -31,9 +31,9 @@ describe("Diagram JSON exchange", () => {
       })),
     };
 
-    expect(parseImportedJson(JSON.stringify(legacy)).schemaVersion).toBe("1.1");
+    expect(parseImportedJson(JSON.stringify(legacy)).schemaVersion).toBe("1.2");
     expect(() => parseImportedJson("not json")).toThrow("IMPORT_INVALID");
-    expect(() => parseImportedJson(JSON.stringify({ schemaVersion: "1.1" }))).toThrow("IMPORT_INVALID");
+    expect(() => parseImportedJson(JSON.stringify({ schemaVersion: "1.2" }))).toThrow("IMPORT_INVALID");
   });
 
   it("imports as a new persisted Diagram without reusing identity metadata", async () => {

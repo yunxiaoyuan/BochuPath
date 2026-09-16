@@ -6,9 +6,10 @@ import { orderedLeafLayers, pathwayEdgeCount, pathwayLayerGroups, sortPathwayNod
 import { nodePathwayContext } from '../src/domain/selectors';
 
 describe('Diagram schema and invariants', () => {
-  it('parses V1.1, migrates the V1.0 step chain, and rejects unknown versions', () => {
+  it('parses V1.2, migrates V1.0 and V1.1, and rejects unknown versions', () => {
     const current = createDemoDiagram();
-    expect(parseDiagram(current).schemaVersion).toBe('1.1');
+    expect(parseDiagram(current).schemaVersion).toBe('1.2');
+    expect(parseDiagram({ ...current, schemaVersion: '1.1' }).schemaVersion).toBe('1.2');
     const legacy = {
       ...current,
       schemaVersion: '1.0',
@@ -18,7 +19,7 @@ describe('Diagram schema and invariants', () => {
       })),
     };
     const migrated = parseDiagram(legacy);
-    expect(migrated.schemaVersion).toBe('1.1');
+    expect(migrated.schemaVersion).toBe('1.2');
     expect(migrated.pathways[0]?.nodeIds).toEqual(current.pathways[0]?.nodeIds);
     expect(migrated.pathways[0]).not.toHaveProperty('steps');
     const invalidLegacy = structuredClone(legacy);
@@ -31,6 +32,16 @@ describe('Diagram schema and invariants', () => {
     expect(validateDiagram(diagram).map((x) => x.code)).toContain('NODE_STYLE_NOT_FOUND');
     diagram.nodes[0]!.styleId = 'style_confirmed'; diagram.layers.push({ id: 'child', parentId: 'layer_demand', name: '子层', order: 10 });
     expect(validateDiagram(diagram).map((x) => x.code)).toContain('NODE_LAYER_NOT_LEAF');
+  });
+  it('persists the added vector shapes and dash-dot line styles', () => {
+    const diagram = createDemoDiagram();
+    diagram.nodeStyles[0]!.shape = 'cylinder';
+    diagram.nodeStyles[0]!.borderStyle = 'dashDot';
+    diagram.pathways[0]!.lineStyle = 'dashDot';
+    const parsed = parseDiagram(diagram);
+    expect(parsed.nodeStyles[0]!.shape).toBe('cylinder');
+    expect(parsed.nodeStyles[0]!.borderStyle).toBe('dashDot');
+    expect(parsed.pathways[0]!.lineStyle).toBe('dashDot');
   });
   it('detects cycles and sibling duplicate names', () => {
     const diagram = createBlankDiagram('规则'); diagram.layers = [

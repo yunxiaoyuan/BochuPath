@@ -4,7 +4,7 @@ export const DEMO_DIAGRAM_ID = 'diagram_demo';
 
 export function createDemoDiagram(): Diagram {
   return {
-    schemaVersion: '1.1', id: DEMO_DIAGRAM_ID, name: '需求到交付示例', description: '用于验证分层、节点样式和跨层通路', revision: 1,
+    schemaVersion: '1.2', id: DEMO_DIAGRAM_ID, name: '需求到交付示例', description: '用于验证分层、节点样式和跨层通路', revision: 1,
     layers: [
       { id: 'layer_demand', parentId: null, name: '需求层', order: 10 },
       { id: 'layer_solution', parentId: null, name: '方案层', order: 20 },
@@ -30,7 +30,7 @@ export function createDemoDiagram(): Diagram {
 export function createBlankDiagram(name: string, id = newId('diagram')): Diagram {
   const now = new Date().toISOString();
   return {
-    schemaVersion: '1.1', id, name: name.trim(), revision: 0, layers: [], nodes: [], pathways: [],
+    schemaVersion: '1.2', id, name: name.trim(), revision: 0, layers: [], nodes: [], pathways: [],
     nodeStyles: [{ id: newId('style'), name: '默认样式', shape: 'roundedRect', fillColor: '#EEF3FF', borderColor: '#2F64F7', borderStyle: 'solid', borderWidth: 1, borderRadius: 4, textColor: '#1F2329', isDefault: true, isSystem: true }],
     layout: { direction: 'TB', layerGap: 32, nodeGap: 24, nodeWidth: 180, nodeMinHeight: 64, fontSize: 14, descriptionFontSize: 12 }, createdAt: now, updatedAt: now,
   };

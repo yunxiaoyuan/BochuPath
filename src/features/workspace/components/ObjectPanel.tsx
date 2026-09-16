@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { EditorMode, Layer } from "../../../domain/types";
 import {
   layerChildren,
@@ -10,6 +10,7 @@ import { pathwayEdgeCount } from "../../../domain/layer-order";
 import { setPathwayVisibility } from "../../../editor/commands";
 import { useEditorStore } from "../../../editor/store";
 import type { CreateKind } from "../WorkspacePage";
+import { NodeShape } from "./NodeShape";
 
 type Tab = "structure" | "pathways" | "styles";
 interface Props {
@@ -23,6 +24,7 @@ export function ObjectPanel({ mode, onCreate, onClose }: Props) {
   const select = useEditorStore((s) => s.select);
   const execute = useEditorStore((s) => s.execute);
   const focusPathway = useEditorStore((s) => s.focusPathway);
+  const focusedPathwayId = useEditorStore((s) => s.focusedPathwayId);
   const selectedNodes = useEditorStore((s) => s.multiSelectedNodeIds);
   const [tab, setTab] = useState<Tab>("structure");
   const [query, setQuery] = useState("");
@@ -32,6 +34,9 @@ export function ObjectPanel({ mode, onCreate, onClose }: Props) {
     [diagram, selectedNodes],
   );
   const roots = layerChildren(diagram, null);
+  useEffect(() => {
+    if (focusedPathwayId) setTab("pathways");
+  }, [focusedPathwayId]);
   return (
     <aside className="object-panel" aria-label="对象面板">
       <div className="panel-heading">
@@ -155,7 +160,8 @@ export function ObjectPanel({ mode, onCreate, onClose }: Props) {
                 <div
                   key={pathway.id}
                   role="listitem"
-                  className={`object-row pathway-row ${selection?.id === pathway.id ? "selected" : ""}`}
+                  className={`object-row pathway-row ${focusedPathwayId === pathway.id ? "selected active-pathway" : ""}`}
+                  aria-current={focusedPathwayId === pathway.id ? "true" : undefined}
                 >
                   {mode === "edit" ? (
                     <button
@@ -189,6 +195,7 @@ export function ObjectPanel({ mode, onCreate, onClose }: Props) {
                   >
                     <i style={{ background: pathway.color }} />
                     <span>{pathway.name}</span>
+                    {focusedPathwayId === pathway.id && <em>{mode === "edit" ? "编辑中" : "已高亮"}</em>}
                     <small>{pathway.nodeIds.length} 节点 · {pathwayEdgeCount(diagram, pathway.nodeIds)} 边</small>
                   </button>
                 </div>
@@ -210,14 +217,9 @@ export function ObjectPanel({ mode, onCreate, onClose }: Props) {
                   className={`object-row style-row ${selection?.id === style.id ? "selected" : ""}`}
                   onClick={() => select({ kind: "nodeStyle", id: style.id })}
                 >
-                  <i
-                    className="style-swatch"
-                    style={{
-                      background: style.fillColor,
-                      borderColor: style.borderColor,
-                      borderStyle: style.borderStyle,
-                    }}
-                  />
+                  <i className="style-swatch">
+                    <NodeShape style={style} width={20} height={20} />
+                  </i>
                   <span>{style.name}</span>
                   <small>{styleReferenceCount(diagram, style.id)}</small>
                   {style.isSystem && <em>系统</em>}

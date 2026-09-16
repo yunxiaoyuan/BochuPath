@@ -5,7 +5,7 @@ export type NodeStyleId = string;
 export type PathwayId = string;
 
 export interface Diagram {
-  schemaVersion: "1.1";
+  schemaVersion: "1.2";
   id: DiagramId;
   name: string;
   description?: string;
@@ -40,10 +40,10 @@ export interface DiagramNode {
 export interface NodeStyle {
   id: NodeStyleId;
   name: string;
-  shape: "rect" | "roundedRect" | "document";
+  shape: "rect" | "roundedRect" | "document" | "ellipse" | "capsule" | "cylinder" | "note";
   fillColor: string;
   borderColor: string;
-  borderStyle: "solid" | "dashed" | "dotted";
+  borderStyle: "solid" | "dashed" | "dotted" | "dashDot";
   borderWidth: 1 | 2 | 3;
   borderRadius: number;
   textColor: string;
@@ -57,7 +57,7 @@ export interface Pathway {
   name: string;
   description?: string;
   color: string;
-  lineStyle: "solid" | "dashed";
+  lineStyle: "solid" | "dashed" | "dashDot";
   visible: boolean;
   order: number;
   nodeIds: NodeId[];
@@ -101,7 +101,7 @@ export interface PathwayDraft {
   name: string;
   nodeIds: NodeId[];
   color: string;
-  lineStyle: "solid" | "dashed";
+  lineStyle: "solid" | "dashed" | "dashDot";
   description: string;
   visible: boolean;
 }
