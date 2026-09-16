@@ -57,6 +57,8 @@ import {
 interface Props {
   mode: EditorMode;
   onCreateNode: () => void;
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
 }
 interface BusinessData extends Record<string, unknown> {
   kind: "business";
@@ -113,7 +115,7 @@ export function PathwayCanvas(props: Props) {
   );
 }
 
-function CanvasInner({ mode, onCreateNode }: Props) {
+function CanvasInner({ mode, onCreateNode, isFullscreen, onToggleFullscreen }: Props) {
   const diagram = useEditorStore((s) => s.diagram)!;
   const tool = useEditorStore((s) => s.tool);
   const setTool = useEditorStore((s) => s.setTool);
@@ -808,6 +810,17 @@ function CanvasInner({ mode, onCreateNode }: Props) {
           <button onClick={() => fitCanvas()} title="完整显示全部节点并适应画布">
             适应
           </button>
+          {mode === "view" && (
+            <button
+              className="canvas-fullscreen-button"
+              aria-pressed={isFullscreen}
+              aria-label={isFullscreen ? "退出全屏" : "画布全屏"}
+              onClick={onToggleFullscreen}
+              title={isFullscreen ? "退出画布全屏（Esc）" : "全屏显示画布"}
+            >
+              {isFullscreen ? "↙ 退出全屏" : "⛶ 画布全屏"}
+            </button>
+          )}
         </div>
       </div>
       {tool === "connectPathway" && (

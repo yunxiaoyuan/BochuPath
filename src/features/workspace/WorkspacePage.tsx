@@ -47,6 +47,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
   const [createKind, setCreateKind] = useState<CreateKind>(null);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
+  const [canvasFullscreen, setCanvasFullscreen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportMessage, setExportMessage] = useState("");
   const shared = usesSharedJsonRepository();
@@ -54,6 +55,24 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
   const ownsLock = useRef(false);
   const editorName = useRef("");
   const sessionId = useRef(getEditorSessionId());
+  const effectiveMode: EditorMode = mode === "edit" && (!shared || lockView.phase === "owned") ? "edit" : "view";
+
+  useEffect(() => {
+    if (effectiveMode === "edit") setCanvasFullscreen(false);
+    else setCreateKind(null);
+  }, [effectiveMode]);
+
+  useEffect(() => {
+    if (!canvasFullscreen) return;
+    const exitFullscreen = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setCanvasFullscreen(false);
+    };
+    window.addEventListener("keydown", exitFullscreen, true);
+    return () => window.removeEventListener("keydown", exitFullscreen, true);
+  }, [canvasFullscreen]);
 
   useEffect(() => {
     const current = useEditorStore.getState();
@@ -318,15 +337,12 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
     ? `已高亮 ${highlightContext.visiblePathways.length} 条可见通路、${highlightContext.relatedNodeIds.size} 个关联节点${highlightContext.hiddenPathways.length ? `；另有 ${highlightContext.hiddenPathways.length} 条隐藏通路` : ""}`
     : "";
   const issueCount = 0;
-  const effectiveMode: EditorMode = mode === "edit" && (!shared || lockView.phase === "owned") ? "edit" : "view";
   return (
-    <div className="workspace-shell">
+    <div className={`workspace-shell ${canvasFullscreen ? "canvas-fullscreen-mode" : ""}`}>
       <a className="skip-link" href="#canvas-region">
         跳到画布
       </a>
-      <a className="skip-link" href="#inspector-region">
-        跳到属性
-      </a>
+      {effectiveMode === "edit" && <a className="skip-link" href="#inspector-region">跳到属性</a>}
       <header className="global-header" aria-label="通路图顶部栏">
         <div className="breadcrumb">
           <button
@@ -396,20 +412,10 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
           >
             导出
           </button>
-          <button
-            className="icon-button responsive-panel-button"
-            onClick={() => setLeftOpen(!leftOpen)}
-            aria-label="切换对象面板"
-          >
-            ☰
-          </button>
-          <button
-            className="icon-button responsive-panel-button"
-            onClick={() => setRightOpen(!rightOpen)}
-            aria-label="切换属性面板"
-          >
-            ▤
-          </button>
+          {effectiveMode === "edit" && <>
+            <button className="icon-button responsive-panel-button" onClick={() => setLeftOpen(!leftOpen)} aria-label="切换对象面板">☰</button>
+            <button className="icon-button responsive-panel-button" onClick={() => setRightOpen(!rightOpen)} aria-label="切换属性面板">▤</button>
+          </>}
           <button
             className="icon-button"
             onClick={onTheme}
@@ -437,9 +443,9 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
         )}
       </div>}
       <main
-        className={`workspace-main ${leftOpen ? "" : "left-closed"} ${rightOpen ? "" : "right-closed"}`}
+        className={`workspace-main ${effectiveMode === "view" ? "view-only" : ""} ${leftOpen ? "" : "left-closed"} ${rightOpen ? "" : "right-closed"}`}
       >
-        {leftOpen && (
+        {effectiveMode === "edit" && leftOpen && (
           <ObjectPanel
             mode={effectiveMode}
             onCreate={(kind) => {
@@ -451,8 +457,13 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
             onClose={() => setLeftOpen(false)}
           />
         )}
-        <PathwayCanvas mode={effectiveMode} onCreateNode={() => setCreateKind("node")} />
-        {rightOpen && (
+        <PathwayCanvas
+          mode={effectiveMode}
+          onCreateNode={() => setCreateKind("node")}
+          isFullscreen={canvasFullscreen}
+          onToggleFullscreen={() => setCanvasFullscreen((current) => !current)}
+        />
+        {effectiveMode === "edit" && rightOpen && (
           <Inspector
             mode={effectiveMode}
             createKind={createKind}
