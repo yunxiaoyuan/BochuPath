@@ -230,9 +230,9 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
         current.setTool("select");
         return;
       }
-      if (event.key === "Escape" && current.selection?.kind === "pathway") {
+      if (event.key === "Escape" && current.focusedPathwayId) {
         event.preventDefault();
-        current.select(null);
+        current.focusPathway(null);
         return;
       }
       if (editing) return;
@@ -326,6 +326,9 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
       </div>
     );
   const diagram = state.diagram;
+  const activePathway = state.focusedPathwayId
+    ? diagram.pathways.find((pathway) => pathway.id === state.focusedPathwayId)
+    : null;
   const highlightedNode =
     state.selection?.kind === "node" && state.multiSelectedNodeIds.length === 1
       ? state.selection.id
@@ -333,9 +336,11 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
   const highlightContext = highlightedNode
     ? nodePathwayContext(diagram, highlightedNode)
     : null;
-  const highlightStatus = highlightContext
-    ? `已高亮 ${highlightContext.visiblePathways.length} 条可见通路、${highlightContext.relatedNodeIds.size} 个关联节点${highlightContext.hiddenPathways.length ? `；另有 ${highlightContext.hiddenPathways.length} 条隐藏通路` : ""}`
-    : "";
+  const highlightStatus = activePathway
+    ? `${mode === "edit" ? "正在编辑" : "已高亮"}通路：${activePathway.name}`
+    : highlightContext
+      ? `已高亮 ${highlightContext.visiblePathways.length} 条可见通路、${highlightContext.relatedNodeIds.size} 个关联节点${highlightContext.hiddenPathways.length ? `；另有 ${highlightContext.hiddenPathways.length} 条隐藏通路` : ""}`
+      : "";
   const issueCount = 0;
   return (
     <div className={`workspace-shell ${canvasFullscreen ? "canvas-fullscreen-mode" : ""}`}>

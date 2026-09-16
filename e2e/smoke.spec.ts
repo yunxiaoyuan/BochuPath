@@ -153,7 +153,7 @@ test("keeps tree, canvas and inspector selection synchronized and undoable", asy
   await expect(page.getByRole("treeitem", { name: "方案会审" })).toBeVisible();
 });
 
-test("clears pathway selection when clicking the canvas background", async ({
+test("keeps the active pathway visible until Escape exits editing", async ({
   page,
 }) => {
   await page.goto("/diagrams/diagram_demo/edit");
@@ -166,8 +166,13 @@ test("clears pathway selection when clicking the canvas background", async ({
 
   await page.locator(".react-flow__pane").click({ position: { x: 12, y: 12 } });
   await expect(page.getByRole("heading", { name: "图概览" })).toBeVisible();
-  await expect(pathwayRow).not.toHaveClass(/selected/);
+  await expect(pathwayRow).toHaveClass(/active-pathway/);
+  await expect(page.locator(".active-pathway-bar").getByText(/正在编辑通路：主通路/)).toBeVisible();
   await expect(page.locator(".react-flow__edge.selected")).toHaveCount(0);
+
+  await page.keyboard.press("Escape");
+  await expect(pathwayRow).not.toHaveClass(/active-pathway/);
+  await expect(page.locator(".active-pathway-bar")).toHaveCount(0);
 });
 
 test("shows an arrowed draft edge and clears the complete draft with Escape", async ({
@@ -235,6 +240,53 @@ test("fully connects two nodes in each occupied layer", async ({ page }) => {
   await expect(page.locator(".react-flow__edge-path")).toHaveCount(6);
 });
 
+test("renders all node shapes without clipping labels and supports dash-dot pathways", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/diagrams/diagram_demo/edit");
+  await page.getByRole("tab", { name: "样式" }).click();
+
+  const shapes = [
+    { label: "文档", name: "文档样式", tag: "path" },
+    { label: "椭圆", name: "椭圆样式", tag: "ellipse" },
+    { label: "腰圆", name: "腰圆样式", tag: "rect" },
+    { label: "圆柱", name: "圆柱样式", tag: "path" },
+    { label: "便签", name: "便签样式", tag: "path" },
+  ];
+  for (const shape of shapes) {
+    await page.getByRole("button", { name: /新增样式/ }).click();
+    await page.getByLabel("样式名称").fill(shape.name);
+    await page.getByLabel("形状").selectOption({ label: shape.label });
+    await page.getByRole("button", { name: "确定", exact: true }).click();
+  }
+
+  await page.getByRole("tab", { name: "结构" }).click();
+  for (const [index, shape] of shapes.entries()) {
+    const nodeName = `CypNest多语言节点${index + 1}`;
+    await page.getByTitle("新增节点").click();
+    await page.getByLabel("节点名称").fill(nodeName);
+    await page.getByLabel("节点样式").selectOption({ label: shape.name });
+    await page.getByLabel("所属叶子层级").selectOption({ label: "需求层" });
+    await page.getByRole("button", { name: "确定", exact: true }).click();
+
+    const node = page.getByRole("button", { name: new RegExp(`${nodeName}，位于 需求层`) });
+    const surface = node.locator(".node-shape-surface");
+    await expect(surface).toHaveCount(1);
+    expect(await surface.evaluate((element) => element.tagName.toLocaleLowerCase())).toBe(shape.tag);
+    await expect.poll(() => node.locator(".business-node-content > strong").evaluate((element) => ({
+      horizontal: element.scrollWidth <= element.clientWidth + 1,
+      vertical: element.scrollHeight <= element.clientHeight + 1,
+    }))).toEqual({ horizontal: true, vertical: true });
+  }
+
+  await page.getByRole("tab", { name: "通路" }).click();
+  await page.locator(".pathway-row").filter({ hasText: "主通路" }).locator(".row-main").click();
+  await page.getByLabel("线型").selectOption("dashDot");
+  await page.getByRole("button", { name: "确定", exact: true }).click();
+  await expect.poll(() => page.locator(".react-flow__edge-path").first().evaluate(
+    (element) => (element as SVGPathElement).style.strokeDasharray,
+  )).toBe("8, 4, 1, 4");
+});
+
 test("highlights complete node context without changing unrelated nodes", async ({
   page,
 }) => {
@@ -245,6 +297,7 @@ test("highlights complete node context without changing unrelated nodes", async 
   await page.getByRole("button", { name: "确定" }).click();
   const unrelatedNode = page.getByRole("button", { name: /未关联节点，位于 需求层/ });
   const unrelatedBusinessNode = unrelatedNode.locator(".business-node");
+  const unrelatedNodeSurface = unrelatedBusinessNode.locator(".node-shape-surface");
 
   await page.getByRole("button", { name: /新建通路/ }).click();
   await unrelatedNode.click();
@@ -255,40 +308,41 @@ test("highlights complete node context without changing unrelated nodes", async 
   const paneBox = await page.locator(".react-flow__pane").boundingBox();
   await page.mouse.click(paneBox!.x + paneBox!.width - 8, paneBox!.y + paneBox!.height - 8);
   await expect(unrelatedBusinessNode).not.toHaveClass(/selected/);
+  await page.keyboard.press("Escape");
   await page.waitForTimeout(200);
   const unrelatedEdge = page
-    .getByRole("button", { name: /新通路：未关联节点 到 方案评审/ })
+    .getByRole("button", { name: /新通路.*：未关联节点 到 方案评审/ })
     .locator(".react-flow__edge-path");
   const unrelatedLayer = page.locator(
     '.react-flow__node-layer[data-id="layer::layer_demand"] .layer-canvas-node',
   );
-  const unrelatedNodeStyleBefore = await visualStyle(unrelatedBusinessNode);
+  const unrelatedNodeStyleBefore = await visualStyle(unrelatedNodeSurface);
   const unrelatedEdgeStyleBefore = await visualStyle(unrelatedEdge);
   const unrelatedLayerStyleBefore = await visualStyle(unrelatedLayer);
   const reviewNode = page
     .getByRole("button", { name: /方案评审，位于 方案层/ })
     .locator(".business-node");
+  const reviewSurface = reviewNode.locator(".node-shape-surface");
   const selectedNode = page
     .getByRole("button", { name: /需求确认，位于 需求层/ })
     .locator(".business-node");
+  const selectedSurface = selectedNode.locator(".node-shape-surface");
   await selectedNode.click();
 
   const relatedNodes = page.locator(".business-node.related");
   await expect(relatedNodes).toHaveCount(2);
   await expect(selectedNode).toHaveClass(/selected/);
-  await expect(selectedNode).toHaveCSS("background-color", "rgb(47, 100, 247)");
+  await expect(selectedSurface).toHaveCSS("fill", "rgb(47, 100, 247)");
   await expect(selectedNode).toHaveCSS("color", "rgb(255, 255, 255)");
   await expect(reviewNode).toHaveClass(/related/);
-  await expect(reviewNode).toHaveCSS("outline-style", "none");
-  await expect(reviewNode).toHaveCSS("border-style", "solid");
-  await expect(reviewNode).toHaveCSS("border-width", "2px");
-  expect(await reviewNode.evaluate((element) =>
-    getComputedStyle(element).boxShadow,
+  await expect(reviewSurface).toHaveCSS("stroke-width", "2px");
+  expect(await reviewNode.locator(".node-shape-graphic").evaluate((element) =>
+    getComputedStyle(element).filter,
   )).not.toBe("none");
   await expect(page.locator(".react-flow__edge.related-edge")).toHaveCount(2);
   await expect(unrelatedBusinessNode).not.toHaveClass(/dimmed/);
   await expect(unrelatedEdge.locator("xpath=..")).not.toHaveClass(/dimmed-edge/);
-  await expect.poll(() => visualStyle(unrelatedBusinessNode)).toEqual(unrelatedNodeStyleBefore);
+  await expect.poll(() => visualStyle(unrelatedNodeSurface)).toEqual(unrelatedNodeStyleBefore);
   await expect.poll(() => visualStyle(unrelatedEdge)).toEqual(unrelatedEdgeStyleBefore);
   await expect.poll(() => visualStyle(unrelatedLayer)).toEqual(unrelatedLayerStyleBefore);
   await page.getByRole("button", { name: "保存", exact: true }).click();
@@ -298,15 +352,14 @@ test("highlights complete node context without changing unrelated nodes", async 
   await expect(page.locator(".business-node.related")).toHaveCount(2);
   await expect(page.locator(".react-flow__edge.related-edge")).toHaveCount(2);
   await expect(unrelatedBusinessNode).not.toHaveClass(/dimmed/);
-  await expect.poll(() => visualStyle(unrelatedBusinessNode)).toEqual(unrelatedNodeStyleBefore);
+  await expect.poll(() => visualStyle(unrelatedNodeSurface)).toEqual(unrelatedNodeStyleBefore);
   await expect.poll(() => visualStyle(unrelatedEdge)).toEqual(unrelatedEdgeStyleBefore);
   await expect.poll(() => visualStyle(unrelatedLayer)).toEqual(unrelatedLayerStyleBefore);
   await page.locator(".react-flow__pane").click({ position: { x: 12, y: 12 } });
   await expect(page.locator(".business-node.related")).toHaveCount(0);
   await expect(page.locator(".react-flow__edge.related-edge")).toHaveCount(0);
   await expect(unrelatedBusinessNode).not.toHaveClass(/dimmed/);
-  await expect(reviewNode).toHaveCSS("border-style", "dashed");
-  await expect(reviewNode).toHaveCSS("border-width", "1px");
+  await expect(reviewSurface).toHaveCSS("stroke-width", "1px");
 });
 
 test("edits same-layer and cross-layer pathway membership directly on the canvas", async ({
@@ -331,17 +384,18 @@ test("edits same-layer and cross-layer pathway membership directly on the canvas
   await page.locator(".pathway-row").filter({ hasText: "主通路" }).locator(".row-main").click();
   await expect(page.getByRole("button", { name: "在画布编辑节点" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "通路属性" })).toBeVisible();
+  await expect(page.locator(".active-pathway-bar").getByText(/正在编辑通路：主通路/)).toBeVisible();
   const demandSupplement = page.getByRole("button", { name: /需求补充，位于 需求层/ });
   await demandSupplement.click();
   await expect(page.getByRole("heading", { name: "节点属性" })).toBeVisible();
-  await page.locator(".pathway-row").filter({ hasText: "主通路" }).locator(".row-main").click();
+  await expect(page.locator(".pathway-row").filter({ hasText: "主通路" })).toHaveClass(/active-pathway/);
   await demandSupplement.click({ modifiers: ["Shift"] });
-  await expect(page.getByText("4 个节点 · 3 个占用层 · 3 条边")).toBeVisible();
+  await expect(page.locator(".active-pathway-bar")).toContainText("4 节点 · 3 边");
   await demandSupplement.click({ modifiers: ["Shift"] });
-  await expect(page.getByText("3 个节点 · 3 个占用层 · 2 条边")).toBeVisible();
+  await expect(page.locator(".active-pathway-bar")).toContainText("3 节点 · 2 边");
   await demandSupplement.click({ modifiers: ["Shift"] });
   await page.getByRole("button", { name: /运营复盘，位于 运营层/ }).click({ modifiers: ["Shift"] });
-  await expect(page.getByText("5 个节点 · 4 个占用层 · 4 条边")).toBeVisible();
+  await expect(page.locator(".active-pathway-bar")).toContainText("5 节点 · 4 边");
   await expect(page.locator(".react-flow__edge-path")).toHaveCount(4);
 
   await page.getByRole("button", { name: "保存", exact: true }).click();
@@ -454,6 +508,7 @@ async function visualStyle(locator: Locator) {
       borderColor: style.borderColor,
       color: style.color,
       filter: style.filter,
+      fill: style.fill,
       opacity: style.opacity,
       stroke: style.stroke,
       strokeWidth: style.strokeWidth,

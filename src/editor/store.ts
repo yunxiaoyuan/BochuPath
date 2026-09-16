@@ -88,6 +88,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         saveState: "clean",
         history: createHistory(),
         selection: { kind: "diagram", id: diagram.id },
+        multiSelectedNodeIds: [],
+        focusedPathwayId: null,
         loading: false,
       });
     } catch (error) {
@@ -130,7 +132,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       tool: "select",
       pathwayDraft: null,
       selection: exitsPathway ? null : state.selection,
-      focusedPathwayId: exitsPathway ? null : state.focusedPathwayId,
+      focusedPathwayId: null,
       message: mode === "view" ? "已切换到查看模式" : "已切换到编辑模式",
     });
   },
@@ -145,7 +147,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       set({
         tool,
         pathwayDraft: {
-          name: "新通路",
+          name: nextPathwayName(state.diagram),
           nodeIds: [],
           color: "#2F64F7",
           lineStyle: "solid",
@@ -176,12 +178,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       set({
         selection,
         multiSelectedNodeIds: ids,
-        focusedPathwayId: null,
+        focusedPathwayId: state.focusedPathwayId,
       });
     } else {
       const nextNodeIds = selection?.kind === "node" ? [selection.id] : [];
       const nextFocusedPathwayId =
-        selection?.kind === "pathway" ? selection.id : null;
+        selection?.kind === "pathway"
+          ? selection.id
+          : selection?.kind === "node" || selection === null
+            ? state.focusedPathwayId
+            : null;
       const sameSelection =
         state.selection?.kind === selection?.kind &&
         state.selection?.id === selection?.id;
@@ -213,8 +219,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       tool: id ? "select" : state.tool,
       pathwayDraft: id ? null : state.pathwayDraft,
       focusedPathwayId: id,
-      selection: id ? { kind: "pathway", id } : null,
-      multiSelectedNodeIds: [],
+      selection: id
+        ? { kind: "pathway", id }
+        : state.selection?.kind === "pathway"
+          ? state.diagram ? { kind: "diagram", id: state.diagram.id } : null
+          : state.selection,
+      multiSelectedNodeIds: id ? [] : state.multiSelectedNodeIds,
     });
   },
   setPathwayDraft: (pathwayDraft) => set({ pathwayDraft }),
@@ -349,6 +359,13 @@ function queueDraft(
       : getRepository().deleteDraft(diagram.id);
     void operation.catch(onError);
   }, 500);
+}
+
+function nextPathwayName(diagram: Diagram | null): string {
+  const names = new Set(diagram?.pathways.map((pathway) => pathway.name) ?? []);
+  let index = 1;
+  while (names.has(`新通路 ${index}`)) index += 1;
+  return `新通路 ${index}`;
 }
 
 function domainMessage(error: unknown, diagram?: Diagram | null): string {

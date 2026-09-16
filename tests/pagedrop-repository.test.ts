@@ -56,7 +56,7 @@ describe("PageDrop shared repository", () => {
     });
     const repository = new PageDropDiagramRepository(client, new MemoryStorage());
     const loaded = await repository.get("diagram_demo");
-    expect(loaded.schemaVersion).toBe("1.1");
+    expect(loaded.schemaVersion).toBe("1.2");
     expect(loaded.pathways[0]?.nodeIds).toEqual(current.pathways[0]?.nodeIds);
     await repository.save(renameDiagram(loaded, { name: "已迁移" }), loaded.revision);
     expect((client.state as BochuPathSharedState).schemaVersion).toBe("1.1");

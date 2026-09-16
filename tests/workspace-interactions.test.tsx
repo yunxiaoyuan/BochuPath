@@ -140,7 +140,7 @@ describe("workspace command transactions and unified selection", () => {
     expect(screen.getByLabelText("所属叶子层级")).toHaveValue("layer_solution");
   });
 
-  it("clears pathway focus when the selection is cleared or changes", () => {
+  it("keeps an active pathway while inspecting nodes and clears it explicitly", () => {
     act(() => useEditorStore.getState().focusPathway("path_main"));
     expect(useEditorStore.getState().selection).toEqual({
       kind: "pathway",
@@ -150,7 +150,7 @@ describe("workspace command transactions and unified selection", () => {
 
     act(() => useEditorStore.getState().select(null));
     expect(useEditorStore.getState().selection).toBeNull();
-    expect(useEditorStore.getState().focusedPathwayId).toBeNull();
+    expect(useEditorStore.getState().focusedPathwayId).toBe("path_main");
 
     act(() => {
       useEditorStore.getState().focusPathway("path_main");
@@ -160,6 +160,10 @@ describe("workspace command transactions and unified selection", () => {
       kind: "node",
       id: "node_demand",
     });
+    expect(useEditorStore.getState().focusedPathwayId).toBe("path_main");
+
+    act(() => useEditorStore.getState().focusPathway(null));
+    expect(useEditorStore.getState().selection).toEqual({ kind: "node", id: "node_demand" });
     expect(useEditorStore.getState().focusedPathwayId).toBeNull();
 
     act(() => {
@@ -168,6 +172,19 @@ describe("workspace command transactions and unified selection", () => {
     });
     expect(useEditorStore.getState().selection).toBeNull();
     expect(useEditorStore.getState().focusedPathwayId).toBeNull();
+  });
+
+  it("switches the object panel to the active pathway and keeps its edit marker", async () => {
+    render(<ObjectPanel mode="edit" onCreate={vi.fn()} onClose={vi.fn()} />);
+    act(() => useEditorStore.getState().focusPathway("path_main"));
+    expect(await screen.findByRole("tab", { name: "通路" })).toHaveAttribute("aria-selected", "true");
+    const row = screen.getByRole("button", { name: /主通路 编辑中/ }).closest('[role="listitem"]')!;
+    expect(row).toHaveAttribute("aria-current", "true");
+    expect(screen.getByText("编辑中")).toBeVisible();
+
+    act(() => useEditorStore.getState().select({ kind: "node", id: "node_demand" }));
+    expect(row).toHaveAttribute("aria-current", "true");
+    expect(screen.getByText("编辑中")).toBeVisible();
   });
 
   it("previews and commits a node batch as one undoable command", async () => {

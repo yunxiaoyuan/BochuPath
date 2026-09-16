@@ -1,7 +1,13 @@
 import { orderedLeafLayers } from '../domain/layer-order';
 import { layerChildren } from '../domain/selectors';
 import { layerDepth, sortStable } from '../domain/rules';
-import type { Diagram, DiagramNode, Layer } from '../domain/types';
+import {
+  shapeContentInsets,
+  shapeContentWidth,
+  shapeMinimumHeight,
+  shapeMinimumWidth,
+} from '../domain/node-shapes';
+import type { Diagram, DiagramNode, Layer, NodeStyle } from '../domain/types';
 
 export interface Point { x: number; y: number }
 export interface Rect extends Point { width: number; height: number }
@@ -354,7 +360,9 @@ function nodeHeight(
   nodeWidth: number,
   adaptive = false,
 ): number {
-  const contentWidth = Math.max(32, nodeWidth - 16);
+  const style = nodeStyleFor(diagram, node);
+  const contentWidth = shapeContentWidth(style.shape, nodeWidth);
+  const insets = shapeContentInsets(style.shape, nodeWidth);
   const configuredTitleLines = wrappedLineCount(
     node.name,
     diagram.layout.fontSize,
@@ -374,7 +382,8 @@ function nodeHeight(
   const details = detailLines ? 4 + detailLines * detailLine : 0;
   return Math.max(
     adaptiveNodeMinHeight(diagram, adaptive),
-    roundToGrid(8 + titleLines * titleLine + details),
+    shapeMinimumHeight(style.shape),
+    roundToGrid(insets.top + titleLines * titleLine + details + insets.bottom),
   );
 }
 
@@ -391,16 +400,19 @@ function contentDrivenNodeWidth(
   adaptive: boolean,
 ): number {
   if (!adaptive) return maximumWidth;
+  const style = nodeStyleFor(diagram, node);
   const titleWidth = estimatedTextWidth(node.name, diagram.layout.fontSize);
   const detailWidth = Math.max(
     0,
     ...node.decompositionItems.map((item) => estimatedTextWidth(item, diagram.layout.descriptionFontSize) + 12),
   );
-  const naturalWidth = roundToGrid(Math.max(titleWidth, detailWidth) + 16);
-  return Math.max(
-    COMPACT_NODE_MIN_WIDTH,
-    Math.min(Math.max(COMPACT_NODE_MIN_WIDTH, maximumWidth), naturalWidth),
-  );
+  const desiredContentWidth = Math.max(titleWidth, detailWidth);
+  const minimumWidth = Math.max(COMPACT_NODE_MIN_WIDTH, shapeMinimumWidth(style.shape));
+  const limit = Math.max(minimumWidth, maximumWidth);
+  for (let width = minimumWidth; width <= limit; width += 4) {
+    if (shapeContentWidth(style.shape, width) >= desiredContentWidth) return width;
+  }
+  return limit;
 }
 
 function packTbRows(
@@ -411,14 +423,26 @@ function packTbRows(
   adaptive: boolean,
 ): PackedBusinessNode[][] {
   const availableWidth = Math.max(COMPACT_NODE_MIN_WIDTH, laneWidth - LANE_PADDING * 2);
-  const maximumItemsPerRow = Math.max(
-    1,
-    Math.min(
-      packing.capacity,
-      Math.floor((availableWidth + packing.nodeGap) / (COMPACT_NODE_MIN_WIDTH + packing.nodeGap)),
-    ),
-  );
-  return chunk(nodes, maximumItemsPerRow).map((row) => {
+  const rows: DiagramNode[][] = [];
+  let row: DiagramNode[] = [];
+  let minimumRowWidth = 0;
+  nodes.forEach((node) => {
+    const minimumWidth = Math.max(
+      COMPACT_NODE_MIN_WIDTH,
+      shapeMinimumWidth(nodeStyleFor(diagram, node).shape),
+    );
+    const nextWidth = minimumRowWidth + (row.length ? packing.nodeGap : 0) + minimumWidth;
+    if (row.length && (row.length >= packing.capacity || nextWidth > availableWidth)) {
+      rows.push(row);
+      row = [];
+      minimumRowWidth = 0;
+    }
+    minimumRowWidth += (row.length ? packing.nodeGap : 0) + minimumWidth;
+    row.push(node);
+  });
+  if (row.length) rows.push(row);
+
+  return rows.map((row) => {
     const naturalWidths = row.map((node) => contentDrivenNodeWidth(diagram, node, packing.nodeWidth, adaptive));
     const availableForNodes = availableWidth - Math.max(0, row.length - 1) * packing.nodeGap;
     const naturalTotal = naturalWidths.reduce((total, width) => total + width, 0);
@@ -426,13 +450,17 @@ function packTbRows(
       return row.map((node, index) => ({ node, width: naturalWidths[index]! }));
     }
 
-    const minimumTotal = COMPACT_NODE_MIN_WIDTH * row.length;
+    const minimumWidths = row.map((node) => Math.max(
+      COMPACT_NODE_MIN_WIDTH,
+      shapeMinimumWidth(nodeStyleFor(diagram, node).shape),
+    ));
+    const minimumTotal = minimumWidths.reduce((total, width) => total + width, 0);
     const flexibleTotal = Math.max(1, naturalTotal - minimumTotal);
     const flexibleBudget = Math.max(0, availableForNodes - minimumTotal);
     return row.map((node, index) => ({
       node,
-      width: COMPACT_NODE_MIN_WIDTH + floorToGrid(
-        (naturalWidths[index]! - COMPACT_NODE_MIN_WIDTH) * flexibleBudget / flexibleTotal,
+      width: minimumWidths[index]! + floorToGrid(
+        (naturalWidths[index]! - minimumWidths[index]!) * flexibleBudget / flexibleTotal,
       ),
     }));
   });
@@ -477,14 +505,41 @@ function lrColumnMetrics(
 }
 
 function wrappedLineCount(text: string, fontSize: number, width: number): number {
-  return Math.max(1, Math.ceil(estimatedTextWidth(text, fontSize) / Math.max(1, width)));
+  const maximum = Math.max(1, width);
+  let lines = 1;
+  let lineWidth = 0;
+  for (const character of text) {
+    if (character === '\n') {
+      lines += 1;
+      lineWidth = 0;
+      continue;
+    }
+    const characterWidth = estimatedCharacterWidth(character, fontSize);
+    if (lineWidth > 0 && lineWidth + characterWidth > maximum) {
+      lines += 1;
+      lineWidth = characterWidth;
+    } else {
+      lineWidth += characterWidth;
+    }
+  }
+  return Math.max(1, lines);
 }
 
 function estimatedTextWidth(text: string, fontSize: number): number {
-  return [...text].reduce(
-    (total, character) => total + fontSize * (/^[\u0000-\u00ff]$/.test(character) ? 0.58 : 1),
-    0,
-  );
+  return [...text].reduce((total, character) => total + estimatedCharacterWidth(character, fontSize), 0);
+}
+
+function estimatedCharacterWidth(character: string, fontSize: number): number {
+  if (/\s/.test(character)) return fontSize * 0.34;
+  if (/[MW@#%&]/.test(character)) return fontSize * 0.92;
+  if (/[A-Z]/.test(character)) return fontSize * 0.72;
+  if (/[a-z0-9]/.test(character)) return fontSize * 0.62;
+  if (/^[\u0000-\u00ff]$/.test(character)) return fontSize * 0.52;
+  return fontSize;
+}
+
+function nodeStyleFor(diagram: Diagram, node: DiagramNode): NodeStyle {
+  return diagram.nodeStyles.find((style) => style.id === node.styleId) ?? diagram.nodeStyles[0]!;
 }
 
 function roundToGrid(value: number): number {
