@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { sortPathwayNodeIds } from './layer-order';
+import { isValidNodeName, normalizeNodeName } from './node-name';
 import type { Diagram } from './types';
 
 const color = z.string().regex(/^(#[0-9a-f]{3,8}|rgba?\(|hsla?\(|[a-z]+$)/i, '颜色格式无效');
@@ -10,10 +11,15 @@ export const layerSchema = z.object({
   description: z.string().optional(), order: z.number().int(),
 });
 
-export const diagramNodeSchema = z.object({
+const legacyDiagramNodeSchema = z.object({
   id: z.string().min(1), layerId: z.string().min(1), styleId: z.string().min(1),
   name: z.string().trim().min(1).max(80), description: z.string().optional(),
   decompositionItems: z.array(z.string().trim().min(1).max(120)), order: z.number().int(),
+});
+
+export const diagramNodeSchema = legacyDiagramNodeSchema.extend({
+  name: z.string().transform(normalizeNodeName).refine(isValidNodeName, '节点名称最多两行且每行不能为空'),
+  styleAssignments: z.record(z.string(), z.string()),
 });
 
 export const nodeStyleSchema = z.object({
@@ -22,6 +28,17 @@ export const nodeStyleSchema = z.object({
   borderStyle: z.enum(['solid', 'dashed', 'dotted', 'dashDot']), borderWidth: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   borderRadius: z.number().min(0).max(32), textColor: color, icon: z.string().optional(),
   isDefault: z.boolean(), isSystem: z.boolean(),
+});
+
+export const styleOptionSchema = z.object({
+  id: z.string().min(1), name: z.string().trim().min(1).max(40),
+  value: z.string().trim().min(1).max(80), order: z.number().int(),
+});
+
+export const styleDimensionSchema = z.object({
+  id: z.string().min(1), name: z.string().trim().min(1).max(40),
+  property: z.enum(['shape', 'fillColor', 'borderColor', 'borderStyle', 'borderWidth', 'textColor']),
+  order: z.number().int(), options: z.array(styleOptionSchema),
 });
 
 const pathwayBaseSchema = z.object({
@@ -44,23 +61,25 @@ export const layoutSchema = z.object({
 });
 
 export const diagramSchema = z.object({
-  schemaVersion: z.literal('1.2'), id: z.string().min(1), name: z.string().trim().min(1).max(80),
+  schemaVersion: z.literal('1.3'), id: z.string().min(1), name: z.string().trim().min(1).max(80),
   description: z.string().optional(), revision: z.number().int().nonnegative(), layers: z.array(layerSchema),
-  nodes: z.array(diagramNodeSchema), nodeStyles: z.array(nodeStyleSchema), pathways: z.array(pathwaySchema),
+  nodes: z.array(diagramNodeSchema), nodeStyles: z.array(nodeStyleSchema), styleDimensions: z.array(styleDimensionSchema), pathways: z.array(pathwaySchema),
   layout: layoutSchema, createdAt: isoDate, updatedAt: isoDate,
 });
 
 const v11DiagramSchema = z.object({
   schemaVersion: z.literal('1.1'), id: z.string().min(1), name: z.string().trim().min(1).max(80),
   description: z.string().optional(), revision: z.number().int().nonnegative(), layers: z.array(layerSchema),
-  nodes: z.array(diagramNodeSchema), nodeStyles: z.array(nodeStyleSchema), pathways: z.array(pathwaySchema),
+  nodes: z.array(legacyDiagramNodeSchema), nodeStyles: z.array(nodeStyleSchema), pathways: z.array(pathwaySchema),
   layout: layoutSchema, createdAt: isoDate, updatedAt: isoDate,
 });
+
+const v12DiagramSchema = v11DiagramSchema.extend({ schemaVersion: z.literal('1.2') });
 
 const legacyDiagramSchema = z.object({
   schemaVersion: z.literal('1.0'), id: z.string().min(1), name: z.string().trim().min(1).max(80),
   description: z.string().optional(), revision: z.number().int().nonnegative(), layers: z.array(layerSchema),
-  nodes: z.array(diagramNodeSchema), nodeStyles: z.array(nodeStyleSchema), pathways: z.array(legacyPathwaySchema),
+  nodes: z.array(legacyDiagramNodeSchema), nodeStyles: z.array(nodeStyleSchema), pathways: z.array(legacyPathwaySchema),
   layout: layoutSchema, createdAt: isoDate, updatedAt: isoDate,
 });
 
@@ -73,7 +92,9 @@ export function migrateDiagram(input: unknown): Diagram {
     const legacy = legacyDiagramSchema.parse(input);
     parsed = diagramSchema.parse({
       ...legacy,
-      schemaVersion: '1.2',
+      schemaVersion: '1.3',
+      styleDimensions: [],
+      nodes: legacy.nodes.map((node) => ({ ...node, styleAssignments: {} })),
       pathways: legacy.pathways.map(({ steps, ...pathway }) => ({
         ...pathway,
         nodeIds: [...steps]
@@ -82,8 +103,12 @@ export function migrateDiagram(input: unknown): Diagram {
       })),
     });
   } else if (version === '1.1') {
-    parsed = diagramSchema.parse({ ...v11DiagramSchema.parse(input), schemaVersion: '1.2' });
+    const legacy = v11DiagramSchema.parse(input);
+    parsed = diagramSchema.parse({ ...legacy, schemaVersion: '1.3', styleDimensions: [], nodes: legacy.nodes.map((node) => ({ ...node, styleAssignments: {} })) });
   } else if (version === '1.2') {
+    const legacy = v12DiagramSchema.parse(input);
+    parsed = diagramSchema.parse({ ...legacy, schemaVersion: '1.3', styleDimensions: [], nodes: legacy.nodes.map((node) => ({ ...node, styleAssignments: {} })) });
+  } else if (version === '1.3') {
     parsed = diagramSchema.parse(input);
   } else {
     throw new Error('SCHEMA_VERSION_UNSUPPORTED');

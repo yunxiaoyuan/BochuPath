@@ -6,10 +6,10 @@ import { orderedLeafLayers, pathwayEdgeCount, pathwayLayerGroups, sortPathwayNod
 import { nodePathwayContext } from '../src/domain/selectors';
 
 describe('Diagram schema and invariants', () => {
-  it('parses V1.2, migrates V1.0 and V1.1, and rejects unknown versions', () => {
+  it('parses V1.3, migrates V1.0, V1.1 and V1.2, and rejects unknown versions', () => {
     const current = createDemoDiagram();
-    expect(parseDiagram(current).schemaVersion).toBe('1.2');
-    expect(parseDiagram({ ...current, schemaVersion: '1.1' }).schemaVersion).toBe('1.2');
+    expect(parseDiagram(current).schemaVersion).toBe('1.3');
+    expect(parseDiagram({ ...current, schemaVersion: '1.1', styleDimensions: undefined, nodes: current.nodes.map(({ styleAssignments: _styleAssignments, ...node }) => node) }).schemaVersion).toBe('1.3');
     const legacy = {
       ...current,
       schemaVersion: '1.0',
@@ -19,7 +19,9 @@ describe('Diagram schema and invariants', () => {
       })),
     };
     const migrated = parseDiagram(legacy);
-    expect(migrated.schemaVersion).toBe('1.2');
+    expect(migrated.schemaVersion).toBe('1.3');
+    expect(migrated.styleDimensions).toEqual([]);
+    expect(migrated.nodes.every((node) => Object.keys(node.styleAssignments).length === 0)).toBe(true);
     expect(migrated.pathways[0]?.nodeIds).toEqual(current.pathways[0]?.nodeIds);
     expect(migrated.pathways[0]).not.toHaveProperty('steps');
     const invalidLegacy = structuredClone(legacy);
@@ -81,7 +83,7 @@ describe('Diagram schema and invariants', () => {
   it('sorts selected pathway nodes by fixed layer and same-layer node order', () => {
     const diagram = createDemoDiagram();
     diagram.nodes.push({
-      id: 'node_demand_alt', layerId: 'layer_demand', styleId: 'style_confirmed',
+      id: 'node_demand_alt', layerId: 'layer_demand', styleId: 'style_confirmed', styleAssignments: {},
       name: '需求补充', decompositionItems: [], order: 20,
     });
     expect(sortPathwayNodeIds(diagram, [

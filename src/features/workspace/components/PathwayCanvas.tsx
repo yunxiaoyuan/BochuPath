@@ -31,6 +31,7 @@ import {
   shapeContentWidth,
 } from "../../../domain/node-shapes";
 import { descendantIds, sortStable } from "../../../domain/rules";
+import { applyStyleValue, resolveNodeStyle, sortedStyleDimensions, styleDimensionPropertyLabel } from "../../../domain/style-dimensions";
 import {
   orderedDiagramNodes,
   pathwayEdgeCount,
@@ -60,6 +61,7 @@ import {
   type Rect,
 } from "../../../layout/swimlane-layout";
 import { NodeShape } from "./NodeShape";
+import { getBrowserStorage } from "../../../persistence/browser-storage";
 
 interface Props {
   mode: EditorMode;
@@ -130,6 +132,7 @@ function CanvasInner({ mode, onCreateNode, isFullscreen, onToggleFullscreen }: P
   const tool = useEditorStore((s) => s.tool);
   const setTool = useEditorStore((s) => s.setTool);
   const select = useEditorStore((s) => s.select);
+  const selectNodes = useEditorStore((s) => s.selectNodes);
   const selection = useEditorStore((s) => s.selection);
   const multiSelectedNodeIds = useEditorStore((s) => s.multiSelectedNodeIds);
   const focused = useEditorStore((s) => s.focusedPathwayId);
@@ -265,9 +268,7 @@ function CanvasInner({ mode, onCreateNode, isFullscreen, onToggleFullscreen }: P
       });
     const businessNodes: BusinessFlowNode[] = layout.nodes.map((rect) => {
       const node = diagram.nodes.find((item) => item.id === rect.id)!;
-      const style =
-        diagram.nodeStyles.find((item) => item.id === node.styleId) ??
-        diagram.nodeStyles[0]!;
+      const style = resolveNodeStyle(diagram, node);
       const pathwayMember = focusedIds.has(node.id);
       const draftMember = draft?.nodeIds.includes(node.id) ?? false;
       const editingFocusedPathway =
@@ -889,6 +890,10 @@ function CanvasInner({ mode, onCreateNode, isFullscreen, onToggleFullscreen }: P
           onPaneClick={() => {
             if (tool !== "connectPathway") select(null);
           }}
+          onSelectionChange={({ nodes }) => {
+            if (tool !== "marquee") return;
+            selectNodes(nodes.filter((node) => node.data.kind === "business").map((node) => node.id));
+          }}
           selectNodesOnDrag={false}
           nodesDraggable={mode === "edit" && tool === "select"}
           nodesConnectable={false}
@@ -915,6 +920,7 @@ function CanvasInner({ mode, onCreateNode, isFullscreen, onToggleFullscreen }: P
             />
           )}
         </ReactFlow>
+        <StyleLegend diagram={diagram} />
         <CanvasTextAlternative diagram={diagram} />
         {!diagram.layers.length && (
           <div className="canvas-empty">
@@ -980,6 +986,7 @@ const BusinessNode = memo(({ data, selected }: NodeProps<BusinessFlowNode>) => (
             ? Math.max(11, data.fontSize - 1)
             : data.fontSize,
           lineHeight: data.compactTitle ? 1.15 : 1.35,
+          whiteSpace: "pre-line",
         }}
       >
         {data.node.name}
@@ -1039,15 +1046,41 @@ function titleNeedsCompactTypography(
   shape: NodeStyle["shape"],
 ): boolean {
   const contentWidth = shapeContentWidth(shape, nodeWidth);
-  const estimatedWidth = [...text].reduce(
-    (total, character) =>
-      total + fontSize * (/^[\u0000-\u00ff]$/.test(character) ? 0.58 : 1),
-    0,
-  );
+  const lines = text.split("\n");
+  const estimatedWidth = Math.max(...lines.map((line) => [...line].reduce(
+    (total, character) => total + fontSize * (/^[\u0000-\u00ff]$/.test(character) ? 0.58 : 1), 0,
+  )));
   // The layout estimate deliberately stays lightweight, but bold browser text and
   // the 2px selected/related border can consume a little more space than the base
   // node. Keep a 3px reserve so titles do not re-wrap or clip when highlighted.
-  return estimatedWidth >= contentWidth - 3;
+  return lines.length > 1 || estimatedWidth >= contentWidth - 3;
+}
+
+function StyleLegend({ diagram }: { diagram: Diagram }) {
+  const dimensions = sortedStyleDimensions(diagram);
+  const [collapsed, setCollapsed] = useState(() => getBrowserStorage().getItem("bochupath:style-legend-collapsed") === "true");
+  if (!dimensions.length) return null;
+  const toggle = () => setCollapsed((current) => {
+    getBrowserStorage().setItem("bochupath:style-legend-collapsed", String(!current));
+    return !current;
+  });
+  if (collapsed) return <button className="style-legend collapsed" onClick={toggle} aria-label="展开图例">图例 ◀</button>;
+  const fallback = diagram.nodeStyles.find((style) => style.isDefault) ?? diagram.nodeStyles[0]!;
+  return (
+    <aside className="style-legend" aria-label="样式图例">
+      <header><strong>图例</strong><button onClick={toggle} aria-label="收起图例">收起 ▶</button></header>
+      {dimensions.map((dimension) => (
+        <div className="style-legend-row" key={dimension.id}>
+          <span title={styleDimensionPropertyLabel(dimension.property)}>{dimension.name}</span>
+          <div>{dimension.options.map((option) => {
+            const preview = { ...fallback };
+            applyStyleValue(preview, dimension.property, option.value);
+            return <span className="style-legend-option" key={option.id}><i><NodeShape style={preview} width={34} height={20} /></i><b>{option.name}</b></span>;
+          })}</div>
+        </div>
+      ))}
+    </aside>
+  );
 }
 
 function applyDragPreview(

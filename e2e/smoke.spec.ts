@@ -253,7 +253,7 @@ test("renders all node shapes without clipping labels and supports dash-dot path
     { label: "便签", name: "便签样式", tag: "path" },
   ];
   for (const shape of shapes) {
-    await page.getByRole("button", { name: /新增样式/ }).click();
+    await page.getByRole("button", { name: /基础样式/ }).click();
     await page.getByLabel("样式名称").fill(shape.name);
     await page.getByLabel("形状").selectOption({ label: shape.label });
     await page.getByRole("button", { name: "确定", exact: true }).click();
@@ -451,6 +451,53 @@ test("batch adds ordered nodes and undoes them together", async ({ page }) => {
   await page.getByLabel("撤销").click();
   for (const name of ["需求提出", "需求分析", "需求归档"])
     await expect(page.getByRole("treeitem", { name })).toHaveCount(0);
+});
+
+test("creates style dimensions, shows the legend, batches node options and keeps a manual line break", async ({ page }) => {
+  await page.goto("/diagrams/diagram_demo/edit");
+  await page.getByRole("tab", { name: "样式" }).click();
+  await page.getByRole("button", { name: "＋ 维度" }).click();
+  await page.getByLabel("维度名称").fill("应对形式");
+  await page.getByLabel("选项 1 名称").fill("自研");
+  await page.getByLabel("选项 1 视觉值").fill("方框");
+  await page.getByRole("button", { name: "＋ 添加选项" }).click();
+  await page.getByLabel("选项 2 名称").fill("外采");
+  await page.getByLabel("选项 2 视觉值").fill("腰圆");
+  await page.getByRole("button", { name: "确定", exact: true }).click();
+
+  await page.getByRole("button", { name: "批量", exact: true }).click();
+  await page.getByLabel("粘贴四列表格").fill("V0.9开发\t底色\t是\t粉色\nV0.9开发\t底色\t否\t白色\nV1.0开发\t边框颜色\t是\t红色\nV1.0开发\t边框颜色\t否\t黑色");
+  await page.getByRole("button", { name: "解析粘贴内容" }).click();
+  await expect(page.getByText("将创建 2 个维度、4 个选项。")).toBeVisible();
+  await page.getByRole("button", { name: "创建", exact: true }).click();
+
+  const legend = page.locator(".style-legend");
+  await expect(legend).toContainText("应对形式");
+  await expect(legend).toContainText("自研");
+  await expect(legend).toContainText("外采");
+  await expect(legend).toContainText("V0.9开发");
+  await expect(legend).toContainText("V1.0开发");
+  await legend.getByRole("button", { name: "收起图例" }).click();
+  await expect(page.getByRole("button", { name: "展开图例" })).toBeVisible();
+  await page.getByRole("button", { name: "展开图例" }).click();
+
+  await page.getByRole("tab", { name: "结构" }).click();
+  await page.getByRole("treeitem", { name: "需求确认" }).click();
+  await page.getByLabel("节点名称").fill("需求\n确认");
+  await page.getByRole("button", { name: "确定", exact: true }).click();
+  await expect(page.locator('.react-flow__node-business[data-id="node_demand"] strong')).toHaveText("需求\n确认");
+
+  await page.getByRole("treeitem", { name: /需求\s+确认/ }).click();
+  await page.getByRole("treeitem", { name: "方案评审" }).click({ modifiers: ["Meta"] });
+  await expect(page.getByRole("heading", { name: /批量设置样式（2）/ })).toBeVisible();
+  await page.getByLabel("应对形式（形状）").selectOption({ label: "外采" });
+  await page.getByRole("button", { name: "确定", exact: true }).click();
+  for (const id of ["node_demand", "node_solution"]) {
+    const capsule = page.locator(`.react-flow__node-business[data-id="${id}"] .node-shape-surface`);
+    await expect(capsule).toHaveAttribute("rx", /.+/);
+    expect(await capsule.evaluate((element) => element.tagName.toLocaleLowerCase())).toBe("rect");
+  }
+  expect(Number(await page.locator('.react-flow__node-business[data-id="node_demand"] .node-shape-surface').getAttribute("rx"))).toBeLessThan(49);
 });
 
 test("offers and restores a newer local draft after reload", async ({ page }) => {

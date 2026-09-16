@@ -1,7 +1,9 @@
 import { newId } from '../domain/seed';
 import { pathwayLayerGroups } from '../domain/layer-order';
+import { isValidNodeName, normalizeNodeName } from '../domain/node-name';
 import { assertValid, descendantIds, DomainError, errorMessages, isLeafLayer, normalizeDiagram } from '../domain/rules';
-import type { Diagram, DiagramNode, Layer, LayoutConfig, NodeStyle, Pathway } from '../domain/types';
+import { isValidStyleOptionValue, normalizeStyleOptionValue } from '../domain/style-dimensions';
+import type { Diagram, DiagramNode, Layer, LayoutConfig, NodeStyle, Pathway, StyleDimension, StyleDimensionProperty } from '../domain/types';
 
 function fail(code: ConstructorParameters<typeof DomainError>[0]['code'], path?: string): never {
   throw new DomainError({ code, path, message: errorMessages[code] });
@@ -75,10 +77,10 @@ export function deleteLayerWithMigration(diagram: Diagram, id: string, targetLay
   });
 }
 
-export interface NodeInput { name: string; layerId: string; styleId: string; description?: string; decompositionItems?: string[]; order?: number }
+export interface NodeInput { name: string; layerId: string; styleId: string; styleAssignments?: Record<string, string>; description?: string; decompositionItems?: string[]; order?: number }
 export function createNode(diagram: Diagram, input: NodeInput): Diagram {
   validateNodeInput(diagram, input);
-  return commit(diagram, (next) => { next.nodes.push({ id: newId('node'), name: input.name.trim(), layerId: input.layerId, styleId: input.styleId, description: input.description?.trim() || undefined, decompositionItems: cleanItems(input.decompositionItems), order: input.order ?? next.nodes.filter((x) => x.layerId === input.layerId).length * 10 + 10 }); });
+  return commit(diagram, (next) => { next.nodes.push({ id: newId('node'), name: normalizeNodeName(input.name), layerId: input.layerId, styleId: input.styleId, styleAssignments: cleanStyleAssignments(next, input.styleAssignments), description: input.description?.trim() || undefined, decompositionItems: cleanItems(input.decompositionItems), order: input.order ?? next.nodes.filter((x) => x.layerId === input.layerId).length * 10 + 10 }); });
 }
 
 export interface BatchNodeInput { names: string[]; layerId: string; styleId: string }
@@ -89,7 +91,7 @@ export function createNodesBatch(diagram: Diagram, input: BatchNodeInput): Diagr
   return commit(diagram, (next) => {
     let order = Math.max(0, ...next.nodes.filter((x) => x.layerId === input.layerId).map((x) => x.order)) + 10;
     names.forEach((name) => {
-      next.nodes.push({ id: newId('node'), name, layerId: input.layerId, styleId: input.styleId, decompositionItems: [], order });
+      next.nodes.push({ id: newId('node'), name: normalizeNodeName(name), layerId: input.layerId, styleId: input.styleId, styleAssignments: {}, decompositionItems: [], order });
       order += 10;
     });
   });
@@ -97,7 +99,7 @@ export function createNodesBatch(diagram: Diagram, input: BatchNodeInput): Diagr
 
 export function updateNode(diagram: Diagram, id: string, input: NodeInput): Diagram {
   validateNodeInput(diagram, input);
-  return commit(diagram, (next) => { const node = next.nodes.find((x) => x.id === id); if (!node) fail('REFERENCE_NOT_FOUND', `nodes.${id}`); Object.assign(node, { name: input.name.trim(), layerId: input.layerId, styleId: input.styleId, description: input.description?.trim() || undefined, decompositionItems: cleanItems(input.decompositionItems) }); if (input.order !== undefined) node.order = input.order; });
+  return commit(diagram, (next) => { const node = next.nodes.find((x) => x.id === id); if (!node) fail('REFERENCE_NOT_FOUND', `nodes.${id}`); Object.assign(node, { name: normalizeNodeName(input.name), layerId: input.layerId, styleId: input.styleId, styleAssignments: input.styleAssignments === undefined ? node.styleAssignments : cleanStyleAssignments(next, input.styleAssignments), description: input.description?.trim() || undefined, decompositionItems: cleanItems(input.decompositionItems) }); if (input.order !== undefined) node.order = input.order; });
 }
 
 export function reorderNode(diagram: Diagram, id: string, targetIndex: number): Diagram {
@@ -110,11 +112,23 @@ export function reorderNode(diagram: Diagram, id: string, targetIndex: number): 
 }
 
 function validateNodeInput(diagram: Diagram, input: NodeInput): void {
-  if (!input.name.trim() || input.name.trim().length > 80) fail('FIELD_INVALID', 'name');
+  if (!isValidNodeName(input.name)) fail('FIELD_INVALID', 'name');
   if (!isLeafLayer(diagram, input.layerId)) fail('NODE_LAYER_NOT_LEAF', 'layerId');
   if (!diagram.nodeStyles.some((x) => x.id === input.styleId)) fail('NODE_STYLE_NOT_FOUND', 'styleId');
+  if (input.styleAssignments) cleanStyleAssignments(diagram, input.styleAssignments);
 }
 function cleanItems(items: string[] = []): string[] { return items.map((x) => x.trim()).filter(Boolean); }
+
+function cleanStyleAssignments(diagram: Diagram, assignments: Record<string, string> = {}): Record<string, string> {
+  const result: Record<string, string> = {};
+  Object.entries(assignments).forEach(([dimensionId, optionId]) => {
+    const dimension = diagram.styleDimensions.find((item) => item.id === dimensionId);
+    if (!dimension) fail('REFERENCE_NOT_FOUND', `styleAssignments.${dimensionId}`);
+    if (!dimension.options.some((item) => item.id === optionId)) fail('STYLE_OPTION_NOT_FOUND', `styleAssignments.${dimensionId}`);
+    result[dimensionId] = optionId;
+  });
+  return result;
+}
 
 export function duplicateNode(diagram: Diagram, id: string): Diagram {
   const source = diagram.nodes.find((x) => x.id === id); if (!source) fail('REFERENCE_NOT_FOUND', `nodes.${id}`);
@@ -155,6 +169,110 @@ export function deleteNodeStyleWithReplacement(diagram: Diagram, id: string, rep
 export function setDefaultStyle(diagram: Diagram, id: string): Diagram {
   const style = diagram.nodeStyles.find((x) => x.id === id); if (!style) fail('REFERENCE_NOT_FOUND', `nodeStyles.${id}`);
   return commit(diagram, (next) => { next.nodeStyles.forEach((x) => { x.isDefault = x.id === id; }); const chosen = next.nodeStyles.find((x) => x.id === id); if (chosen) chosen.isSystem = true; });
+}
+
+export interface StyleOptionInput { id?: string; name: string; value: string; order?: number }
+export interface StyleDimensionInput { name: string; property: StyleDimensionProperty; options: StyleOptionInput[]; order?: number }
+
+function validateStyleDimensionInput(diagram: Diagram, input: StyleDimensionInput, editingId?: string): void {
+  if (!input.name.trim() || input.name.trim().length > 40) fail('FIELD_INVALID', 'name');
+  if (diagram.styleDimensions.some((item) => item.id !== editingId && item.property === input.property)) fail('STYLE_DIMENSION_PROPERTY_DUPLICATE', 'property');
+  if (!input.options.length) fail('FIELD_INVALID', 'options');
+  const names = new Set<string>();
+  input.options.forEach((option, index) => {
+    const name = option.name.trim();
+    if (!name || name.length > 40 || names.has(name)) fail('FIELD_INVALID', `options.${index}.name`);
+    names.add(name);
+    if (!isValidStyleOptionValue(input.property, option.value)) fail('FIELD_INVALID', `options.${index}.value`);
+  });
+}
+
+function buildStyleDimension(input: StyleDimensionInput, id = newId('dimension')): StyleDimension {
+  return {
+    id,
+    name: input.name.trim(),
+    property: input.property,
+    order: input.order ?? 10,
+    options: input.options.map((option, index) => ({
+      id: option.id ?? newId('option'),
+      name: option.name.trim(),
+      value: normalizeStyleOptionValue(input.property, option.value),
+      order: option.order ?? (index + 1) * 10,
+    })),
+  };
+}
+
+export function createStyleDimension(diagram: Diagram, input: StyleDimensionInput): Diagram {
+  validateStyleDimensionInput(diagram, input);
+  return commit(diagram, (next) => {
+    next.styleDimensions.push(buildStyleDimension({ ...input, order: input.order ?? (next.styleDimensions.length + 1) * 10 }));
+  });
+}
+
+export function createStyleDimensionsBatch(diagram: Diagram, inputs: StyleDimensionInput[]): Diagram {
+  if (!inputs.length) fail('FIELD_INVALID', 'styleDimensions');
+  const properties = new Set(diagram.styleDimensions.map((item) => item.property));
+  inputs.forEach((input, index) => {
+    validateStyleDimensionInput(diagram, input);
+    if (properties.has(input.property)) fail('STYLE_DIMENSION_PROPERTY_DUPLICATE', `styleDimensions.${index}.property`);
+    properties.add(input.property);
+  });
+  return commit(diagram, (next) => {
+    let order = Math.max(0, ...next.styleDimensions.map((item) => item.order)) + 10;
+    inputs.forEach((input) => {
+      next.styleDimensions.push(buildStyleDimension({ ...input, order }));
+      order += 10;
+    });
+  });
+}
+
+export function updateStyleDimension(diagram: Diagram, id: string, input: StyleDimensionInput): Diagram {
+  const source = diagram.styleDimensions.find((item) => item.id === id);
+  if (!source) fail('REFERENCE_NOT_FOUND', `styleDimensions.${id}`);
+  validateStyleDimensionInput(diagram, input, id);
+  return commit(diagram, (next) => {
+    const dimension = next.styleDimensions.find((item) => item.id === id)!;
+    const updated = buildStyleDimension({ ...input, order: input.order ?? dimension.order }, id);
+    const validOptionIds = new Set(updated.options.map((item) => item.id));
+    Object.assign(dimension, updated);
+    next.nodes.forEach((node) => {
+      const optionId = node.styleAssignments[id];
+      if (optionId && !validOptionIds.has(optionId)) delete node.styleAssignments[id];
+    });
+  });
+}
+
+export function deleteStyleDimension(diagram: Diagram, id: string): Diagram {
+  if (!diagram.styleDimensions.some((item) => item.id === id)) fail('REFERENCE_NOT_FOUND', `styleDimensions.${id}`);
+  return commit(diagram, (next) => {
+    next.styleDimensions = next.styleDimensions.filter((item) => item.id !== id);
+    next.nodes.forEach((node) => { delete node.styleAssignments[id]; });
+  });
+}
+
+export interface BatchNodeStyleInput {
+  styleId?: string;
+  assignments: Record<string, string | null | undefined>;
+}
+
+export function applyNodeStylesBatch(diagram: Diagram, nodeIds: string[], input: BatchNodeStyleInput): Diagram {
+  const ids = [...new Set(nodeIds)];
+  if (!ids.length || ids.some((id) => !diagram.nodes.some((node) => node.id === id))) fail('REFERENCE_NOT_FOUND', 'nodeIds');
+  if (input.styleId && !diagram.nodeStyles.some((style) => style.id === input.styleId)) fail('NODE_STYLE_NOT_FOUND', 'styleId');
+  Object.entries(input.assignments).forEach(([dimensionId, optionId]) => {
+    if (optionId === undefined || optionId === null) return;
+    cleanStyleAssignments(diagram, { [dimensionId]: optionId });
+  });
+  return commit(diagram, (next) => {
+    next.nodes.filter((node) => ids.includes(node.id)).forEach((node) => {
+      if (input.styleId) node.styleId = input.styleId;
+      Object.entries(input.assignments).forEach(([dimensionId, optionId]) => {
+        if (optionId === undefined) return;
+        if (optionId === null) delete node.styleAssignments[dimensionId];
+        else node.styleAssignments[dimensionId] = optionId;
+      });
+    });
+  });
 }
 
 export interface PathwayMetadataInput { name: string; color: string; lineStyle: Pathway['lineStyle']; description?: string; visible?: boolean }

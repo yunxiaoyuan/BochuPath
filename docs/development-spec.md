@@ -164,10 +164,12 @@ type DiagramId = string;
 type LayerId = string;
 type NodeId = string;
 type NodeStyleId = string;
+type StyleDimensionId = string;
+type StyleOptionId = string;
 type PathwayId = string;
 
 interface Diagram {
-  schemaVersion: '1.2';
+  schemaVersion: '1.3';
   id: DiagramId;
   name: string;
   description?: string;
@@ -175,6 +177,7 @@ interface Diagram {
   layers: Layer[];
   nodes: DiagramNode[];
   nodeStyles: NodeStyle[];
+  styleDimensions: StyleDimension[];
   pathways: Pathway[];
   layout: LayoutConfig;
   createdAt: string; // ISO 8601
@@ -193,9 +196,25 @@ interface DiagramNode {
   id: NodeId;
   layerId: LayerId;
   styleId: NodeStyleId;
+  styleAssignments: Record<StyleDimensionId, StyleOptionId>;
   name: string;
   description?: string;
   decompositionItems: string[];
+  order: number;
+}
+
+interface StyleDimension {
+  id: StyleDimensionId;
+  name: string;
+  property: 'shape' | 'fillColor' | 'borderColor' | 'borderStyle' | 'borderWidth' | 'textColor';
+  order: number;
+  options: StyleOption[];
+}
+
+interface StyleOption {
+  id: StyleOptionId;
+  name: string;
+  value: string;
   order: number;
 }
 
@@ -252,6 +271,7 @@ interface LayoutConfig {
 | Layer | 层级名称、上级层级、顺序、说明 | 名称 1–40 字；同一父层下不重名 |
 | Node | 节点名称、所属叶子层级、节点样式、拆解信息、业务备注 | 名称 1–80 字；拆解信息为可增删排序的短文本数组 |
 | NodeStyle | 样式名称、形状、填充、边框、文字、图标/标记 | 名称 1–40 字；颜色必须是可解析颜色；至少一个默认样式 |
+| StyleDimension | 维度名称、受控视觉属性、选项名称与视觉值 | 每图同一视觉属性只允许一个维度；每个维度至少一个选项；不同维度叠加到基础样式 |
 | Pathway | 通路名称、节点集合、颜色、线型、备注、是否显示 | 名称 1–80 字；节点不重复且至少占用两个不同叶子层级；相邻占用层自动全连接，同层不连边 |
 
 ### 4.4 示例数据
@@ -261,7 +281,7 @@ interface LayoutConfig {
 呈现代码宏出错: 参数'com.atlassian.confluence.ext.code.render.InvalidValueException'的值无效
 ```text
 {
-  "schemaVersion": "1.2",
+  "schemaVersion": "1.3",
   "id": "diagram_demo",
   "name": "需求到交付示例",
   "description": "用于验证分层、节点样式和跨层通路",
@@ -272,14 +292,15 @@ interface LayoutConfig {
     { "id": "layer_delivery", "parentId": null, "name": "交付层", "order": 30 }
   ],
   "nodes": [
-    { "id": "node_demand", "layerId": "layer_demand", "styleId": "style_confirmed", "name": "需求确认", "decompositionItems": ["范围", "目标"], "order": 10 },
-    { "id": "node_solution", "layerId": "layer_solution", "styleId": "style_review", "name": "方案评审", "decompositionItems": ["业务方案", "技术方案"], "order": 10 },
-    { "id": "node_delivery", "layerId": "layer_delivery", "styleId": "style_confirmed", "name": "交付验收", "decompositionItems": ["验收结论"], "order": 10 }
+    { "id": "node_demand", "layerId": "layer_demand", "styleId": "style_confirmed", "styleAssignments": {}, "name": "需求确认", "decompositionItems": ["范围", "目标"], "order": 10 },
+    { "id": "node_solution", "layerId": "layer_solution", "styleId": "style_review", "styleAssignments": {}, "name": "方案评审", "decompositionItems": ["业务方案", "技术方案"], "order": 10 },
+    { "id": "node_delivery", "layerId": "layer_delivery", "styleId": "style_confirmed", "styleAssignments": {}, "name": "交付验收", "decompositionItems": ["验收结论"], "order": 10 }
   ],
   "nodeStyles": [
     { "id": "style_confirmed", "name": "已确认", "shape": "roundedRect", "fillColor": "#EAF7EF", "borderColor": "#2E8B57", "borderStyle": "solid", "borderWidth": 1, "borderRadius": 4, "textColor": "#1F2329", "isDefault": true, "isSystem": true },
     { "id": "style_review", "name": "待评审", "shape": "roundedRect", "fillColor": "#FFF5E6", "borderColor": "#C97A00", "borderStyle": "dashed", "borderWidth": 1, "borderRadius": 4, "textColor": "#1F2329", "isDefault": false, "isSystem": false }
   ],
+  "styleDimensions": [],
   "pathways": [
     { "id": "path_main", "name": "主通路", "color": "#2F64F7", "lineStyle": "solid", "visible": true, "order": 10,
       "nodeIds": ["node_demand", "node_solution", "node_delivery"] }
@@ -684,7 +705,7 @@ bochupath:v1:draft:<diagramId>
 ```
 
 - index 只存摘要；Diagram 分 key 存储；
-- `schemaVersion` 必填；当前为 `1.2`，读取 `1.1` 时升级形状与线型枚举，读取 `1.0` 时同时通过显式 migration 将 `steps[].nodeId` 提取并按画布固定顺序规范化为 `nodeIds[]`；未知版本和只占用一个层级的旧通路停止迁移并报告，不在组件里临时兼容或猜测修复；
+- `schemaVersion` 必填；当前为 `1.3`，读取 `1.2`、`1.1` 时补齐空的样式维度与节点选项绑定，读取 `1.0` 时还通过显式 migration 将 `steps[].nodeId` 提取并按画布固定顺序规范化为 `nodeIds[]`；未知版本和只占用一个层级的旧通路停止迁移并报告，不在组件里临时兼容或猜测修复；
 - 每个已提交命令后 500ms 防抖写本地草稿；手动保存写正式文档、递增 revision、清除草稿并设为 clean；
 - 打开图时若草稿更新时间晚于正式版本，提示“恢复草稿 / 放弃草稿”，不得自动覆盖；
 - localStorage 满、解析失败或写入失败时显示持久 Message Bar，保留内存中的未保存内容。

@@ -10,6 +10,7 @@ import { nodePathwayContext } from "../../domain/selectors";
 import { ObjectPanel } from "./components/ObjectPanel";
 import { PathwayCanvas } from "./components/PathwayCanvas";
 import { Inspector } from "./components/Inspector";
+import { StyleDimensionBatchDialog } from "./components/StyleDimensionBatchDialog";
 import { DiagramExportDialog } from "../diagrams/DiagramExportDialog";
 import { saveDiagramFile } from "../../persistence/exchange";
 import {
@@ -24,6 +25,8 @@ export type CreateKind =
   | "layer"
   | "node"
   | "nodeStyle"
+  | "styleDimension"
+  | "styleDimensionsBatch"
   | "pathway"
   | "batch"
   | null;
@@ -50,6 +53,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
   const [canvasFullscreen, setCanvasFullscreen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportMessage, setExportMessage] = useState("");
+  const [styleBatchOpen, setStyleBatchOpen] = useState(false);
   const shared = usesSharedJsonRepository();
   const [lockView, setLockView] = useState<LockView>({ phase: shared ? "checking" : "disabled" });
   const ownsLock = useRef(false);
@@ -457,6 +461,9 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
               if (kind === "pathway") {
                 setCreateKind(null);
                 state.setTool("connectPathway");
+              } else if (kind === "styleDimensionsBatch") {
+                setCreateKind(null);
+                setStyleBatchOpen(true);
               } else setCreateKind(kind);
             }}
             onClose={() => setLeftOpen(false)}
@@ -498,6 +505,7 @@ export function WorkspacePage({ mode, theme, onTheme }: Props) {
       </div>
       {exportMessage && <div className="export-toast" role="status">{exportMessage}</div>}
       {exportOpen && <DiagramExportDialog diagram={diagram} onClose={() => setExportOpen(false)} />}
+      {styleBatchOpen && <StyleDimensionBatchDialog onClose={() => setStyleBatchOpen(false)} />}
     </div>
   );
 

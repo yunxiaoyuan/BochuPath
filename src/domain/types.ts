@@ -2,10 +2,12 @@ export type DiagramId = string;
 export type LayerId = string;
 export type NodeId = string;
 export type NodeStyleId = string;
+export type StyleDimensionId = string;
+export type StyleOptionId = string;
 export type PathwayId = string;
 
 export interface Diagram {
-  schemaVersion: "1.2";
+  schemaVersion: "1.3";
   id: DiagramId;
   name: string;
   description?: string;
@@ -13,6 +15,7 @@ export interface Diagram {
   layers: Layer[];
   nodes: DiagramNode[];
   nodeStyles: NodeStyle[];
+  styleDimensions: StyleDimension[];
   pathways: Pathway[];
   layout: LayoutConfig;
   createdAt: string;
@@ -31,10 +34,34 @@ export interface DiagramNode {
   id: NodeId;
   layerId: LayerId;
   styleId: NodeStyleId;
+  styleAssignments: Record<StyleDimensionId, StyleOptionId>;
   name: string;
   description?: string;
   decompositionItems: string[];
   order: number;
+}
+
+export type StyleDimensionProperty =
+  | "shape"
+  | "fillColor"
+  | "borderColor"
+  | "borderStyle"
+  | "borderWidth"
+  | "textColor";
+
+export interface StyleOption {
+  id: StyleOptionId;
+  name: string;
+  value: string;
+  order: number;
+}
+
+export interface StyleDimension {
+  id: StyleDimensionId;
+  name: string;
+  property: StyleDimensionProperty;
+  order: number;
+  options: StyleOption[];
 }
 
 export interface NodeStyle {
@@ -78,6 +105,7 @@ export type Selection =
   | { kind: "layer"; id: LayerId }
   | { kind: "node"; id: NodeId }
   | { kind: "nodeStyle"; id: NodeStyleId }
+  | { kind: "styleDimension"; id: StyleDimensionId }
   | { kind: "pathway"; id: PathwayId }
   | { kind: "pathwayDraft"; id: "new" }
   | null;
