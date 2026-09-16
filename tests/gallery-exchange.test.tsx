@@ -36,7 +36,7 @@ describe("gallery JSON exchange", () => {
     await user.click(screen.getByRole("button", { name: "导出" }));
     await waitFor(() => expect(screen.getByText("文件已保存")).toBeInTheDocument());
     expect(screen.queryByRole("dialog", { name: "导出通路图" })).not.toBeInTheDocument();
-    expect(savedJson).toContain('"schemaVersion": "1.2"');
+    expect(savedJson).toContain('"schemaVersion": "1.3"');
     expect(closed).toBe(true);
     delete (window as Window & { showSaveFilePicker?: unknown }).showSaveFilePicker;
 

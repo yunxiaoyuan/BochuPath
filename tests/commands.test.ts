@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createBlankDiagram, createDemoDiagram } from '../src/domain/seed';
 import { parseBatchNames } from '../src/editor/batch-input';
-import { addPathwayNode, createLayer, createLayersBatch, createNode, createNodesBatch, createNodeStyle, createPathway, deleteNode, deleteNodeStyleWithReplacement, removePathwayNode, reorderLayer, reorderNode, setDefaultStyle, updateNode, updatePathwayMetadata } from '../src/editor/commands';
+import { groupStyleDimensionRows, parseStyleDimensionRows } from '../src/editor/style-dimension-input';
+import { resolveNodeStyle } from '../src/domain/style-dimensions';
+import { addPathwayNode, applyNodeStylesBatch, createLayer, createLayersBatch, createNode, createNodesBatch, createNodeStyle, createPathway, createStyleDimensionsBatch, deleteNode, deleteNodeStyleWithReplacement, removePathwayNode, reorderLayer, reorderNode, setDefaultStyle, updateNode, updatePathwayMetadata } from '../src/editor/commands';
 
 describe('domain commands', () => {
   it('creates a child and migrates existing nodes atomically', () => {
@@ -51,6 +53,37 @@ describe('domain commands', () => {
   });
   it('parses Chinese/English semicolons and line breaks in order', () => {
     expect(parseBatchNames(' 需求层；方案层;\n交付层\n\n')).toEqual(['需求层', '方案层', '交付层']);
+  });
+  it('groups pasted style dimension rows from a spreadsheet', () => {
+    const rows = parseStyleDimensionRows('应对形式\t形状\t自研\t方框\n应对形式\t形状\t外采\t腰圆\nV0.9开发\t底色\t是\t粉色');
+    expect(groupStyleDimensionRows(rows)).toEqual([
+      { name: '应对形式', property: 'shape', options: [{ name: '自研', value: '方框' }, { name: '外采', value: '腰圆' }] },
+      { name: 'V0.9开发', property: 'fillColor', options: [{ name: '是', value: '粉色' }] },
+    ]);
+  });
+  it('normalizes a forced node line break and rejects more than two lines', () => {
+    let diagram = createDemoDiagram();
+    diagram = createNode(diagram, { name: '激光火焰\\n复合切割机', layerId: 'layer_demand', styleId: 'style_confirmed' });
+    expect(diagram.nodes.at(-1)?.name).toBe('激光火焰\n复合切割机');
+    expect(() => createNode(diagram, { name: '一\n二\n三', layerId: 'layer_demand', styleId: 'style_confirmed' })).toThrow('FIELD_INVALID');
+  });
+  it('composes independent style dimensions and batch updates only specified dimensions', () => {
+    let diagram = createDemoDiagram();
+    diagram = createStyleDimensionsBatch(diagram, [
+      { name: '应对形式', property: 'shape', options: [{ name: '自研', value: '方框' }, { name: '外采', value: '腰圆' }] },
+      { name: 'V0.9开发', property: 'fillColor', options: [{ name: '是', value: '粉色' }, { name: '否', value: '白色' }] },
+      { name: 'V1.0开发', property: 'borderColor', options: [{ name: '是', value: '红色' }, { name: '否', value: '黑色' }] },
+    ]);
+    const [shape, fill, border] = diagram.styleDimensions;
+    diagram = applyNodeStylesBatch(diagram, ['node_demand', 'node_solution'], {
+      assignments: { [shape!.id]: shape!.options[1]!.id, [fill!.id]: fill!.options[0]!.id },
+    });
+    diagram = applyNodeStylesBatch(diagram, ['node_demand'], { assignments: { [border!.id]: border!.options[0]!.id } });
+    const style = resolveNodeStyle(diagram, diagram.nodes.find((node) => node.id === 'node_demand')!);
+    expect(style.shape).toBe('capsule');
+    expect(style.fillColor).toBe('#FFE2E6');
+    expect(style.borderColor).toBe('#E5484D');
+    expect(diagram.nodes.find((node) => node.id === 'node_solution')!.styleAssignments[border!.id]).toBeUndefined();
   });
   it('creates ordered layers and nodes as atomic batches', () => {
     let diagram = createBlankDiagram('批量创建');

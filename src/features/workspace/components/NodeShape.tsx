@@ -100,7 +100,10 @@ function ShapeGeometry({ shape, width, height, borderRadius, ...props }: Geometr
   if (shape === "note") {
     return <path d="M1 1 H80 L99 20 V99 H1 Z" {...props as SVGProps<SVGPathElement>} />;
   }
-  if (shape === "capsule") return <rect x="1" y="1" width="98" height="98" rx="49" ry="49" {...props as SVGProps<SVGRectElement>} />;
+  if (shape === "capsule") {
+    const rx = Math.min(49, Math.max(2, (height / Math.max(1, width)) * 50));
+    return <rect x="1" y="1" width="98" height="98" rx={rx} ry="49" {...props as SVGProps<SVGRectElement>} />;
+  }
   const rx = shape === "roundedRect"
     ? Math.min(48, Math.max(0, borderRadius / Math.max(1, width) * 100))
     : 0;

@@ -12,8 +12,8 @@ describe('derived canvas', () => {
   it('fully connects consecutive occupied layers and never connects same-layer nodes', () => {
     const diagram = createDemoDiagram();
     diagram.nodes.push(
-      { id: 'node_demand_alt', layerId: 'layer_demand', styleId: 'style_confirmed', name: '补充需求', decompositionItems: [], order: 20 },
-      { id: 'node_delivery_alt', layerId: 'layer_delivery', styleId: 'style_confirmed', name: '补充交付', decompositionItems: [], order: 20 },
+      { id: 'node_demand_alt', layerId: 'layer_demand', styleId: 'style_confirmed', styleAssignments: {}, name: '补充需求', decompositionItems: [], order: 20 },
+      { id: 'node_delivery_alt', layerId: 'layer_delivery', styleId: 'style_confirmed', styleAssignments: {}, name: '补充交付', decompositionItems: [], order: 20 },
     );
     diagram.pathways[0]!.nodeIds = ['node_demand', 'node_demand_alt', 'node_delivery', 'node_delivery_alt'];
     const edges = deriveEdges(diagram);
@@ -41,7 +41,7 @@ describe('derived canvas', () => {
     diagram.nodes = Array.from({ length: 24 }, (_, index) => ({
       id: `dense-${index}`,
       layerId: 'dense',
-      styleId: 'style_confirmed',
+      styleId: 'style_confirmed', styleAssignments: {},
       name: `节点 ${index + 1}`,
       decompositionItems: [],
       order: (index + 1) * 10,
@@ -84,7 +84,7 @@ describe('derived canvas', () => {
     diagram.nodes = layers.flatMap((layer, layerIndex) => Array.from({ length: layer.count }, (_, nodeIndex) => ({
       id: `node-${layer.id}-${nodeIndex + 1}`,
       layerId: layer.id,
-      styleId: 'style_confirmed',
+      styleId: 'style_confirmed', styleAssignments: {},
       name: representativeNames[(layerIndex + nodeIndex) % representativeNames.length]!,
       decompositionItems: [],
       order: (nodeIndex + 1) * 10,
@@ -127,7 +127,7 @@ describe('derived canvas', () => {
     diagram.nodes = Array.from({ length: 12 }, (_, index) => ({
       id: `single-row-${index}`,
       layerId: 'single-row',
-      styleId: 'style_confirmed',
+      styleId: 'style_confirmed', styleAssignments: {},
       name: `跨部门业务需求确认节点 ${index + 1}`,
       decompositionItems: [],
       order: (index + 1) * 10,
@@ -146,7 +146,7 @@ describe('derived canvas', () => {
     diagram.nodes = Array.from({ length: 6 }, (_, index) => ({
       id: `lr-node-${index}`,
       layerId: 'lr-layer',
-      styleId: 'style_confirmed',
+      styleId: 'style_confirmed', styleAssignments: {},
       name: index === 0 ? '包含较长拆解说明的节点' : `短节点 ${index}`,
       decompositionItems: index === 0
         ? ['这是一段用于验证按内容独立计算节点高度的较长拆解说明，不能把同列的其他节点一起撑高。']
@@ -180,7 +180,7 @@ describe('derived canvas', () => {
       Array.from({ length: 8 }, (_, nodeIndex) => ({
         id: `real-node-${layerIndex + 1}-${nodeIndex + 1}`,
         layerId: `leaf-${layerIndex + 1}`,
-        styleId: 'style_confirmed',
+        styleId: 'style_confirmed', styleAssignments: {},
         name: `跨部门业务协同节点 ${layerIndex + 1}.${nodeIndex + 1}`,
         decompositionItems: ['确认输入资料与责任人', '输出评审结论与后续动作'],
         order: (nodeIndex + 1) * 10,
@@ -221,8 +221,8 @@ describe('derived canvas', () => {
       { id: 'leaf-b', parentId: 'middle-b', name: '叶层 B', order: 10 },
     ];
     diagram.nodes = [
-      { id: 'node-a', layerId: 'leaf-a', styleId: 'style_confirmed', name: '节点 A', decompositionItems: [], order: 10 },
-      { id: 'node-b', layerId: 'leaf-b', styleId: 'style_confirmed', name: '节点 B', decompositionItems: [], order: 10 },
+      { id: 'node-a', layerId: 'leaf-a', styleId: 'style_confirmed', styleAssignments: {}, name: '节点 A', decompositionItems: [], order: 10 },
+      { id: 'node-b', layerId: 'leaf-b', styleId: 'style_confirmed', styleAssignments: {}, name: '节点 B', decompositionItems: [], order: 10 },
     ];
     diagram.pathways = [];
 

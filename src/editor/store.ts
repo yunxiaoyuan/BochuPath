@@ -45,6 +45,7 @@ interface EditorState {
   setMode: (mode: EditorMode) => void;
   setTool: (tool: EditorTool) => void;
   select: (selection: Selection, additive?: boolean) => void;
+  selectNodes: (ids: string[]) => void;
   focusPathway: (id: string | null) => void;
   setPathwayDraft: (draft: PathwayDraft | null) => void;
   undo: () => void;
@@ -216,6 +217,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         focusedPathwayId: nextFocusedPathwayId,
       });
     }
+  },
+  selectNodes: (ids) => {
+    const state = get();
+    const valid = [...new Set(ids)].filter((id) => state.diagram?.nodes.some((node) => node.id === id));
+    set({
+      selection: valid.length ? { kind: "node", id: valid[valid.length - 1]! } : state.diagram ? { kind: "diagram", id: state.diagram.id } : null,
+      multiSelectedNodeIds: valid,
+      focusedPathwayId: state.focusedPathwayId,
+    });
   },
   focusPathway: (id) => {
     const state = get();

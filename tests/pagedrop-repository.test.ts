@@ -37,7 +37,7 @@ function initialState(): BochuPathSharedState {
 }
 
 describe("PageDrop shared repository", () => {
-  it("loads V1.0 shared JSON and writes V1.1 after the next save", async () => {
+  it("loads V1.0 shared JSON and writes V1.3 after the next save", async () => {
     const current = createDemoDiagram();
     const legacyDiagram = {
       ...current,
@@ -56,7 +56,7 @@ describe("PageDrop shared repository", () => {
     });
     const repository = new PageDropDiagramRepository(client, new MemoryStorage());
     const loaded = await repository.get("diagram_demo");
-    expect(loaded.schemaVersion).toBe("1.2");
+    expect(loaded.schemaVersion).toBe("1.3");
     expect(loaded.pathways[0]?.nodeIds).toEqual(current.pathways[0]?.nodeIds);
     await repository.save(renameDiagram(loaded, { name: "已迁移" }), loaded.revision);
     expect((client.state as BochuPathSharedState).schemaVersion).toBe("1.1");

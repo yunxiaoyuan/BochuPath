@@ -251,7 +251,7 @@ describe("workspace command transactions and unified selection", () => {
     diagram.nodes.push({
       id: "node_operation",
       layerId: "layer_operation",
-      styleId: "style_confirmed",
+      styleId: "style_confirmed", styleAssignments: {},
       name: "运营复盘",
       decompositionItems: [],
       order: 10,

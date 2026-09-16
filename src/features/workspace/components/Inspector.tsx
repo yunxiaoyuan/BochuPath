@@ -18,6 +18,8 @@ import type {
   NodeStyle,
   Pathway,
   Selection,
+  StyleDimension,
+  StyleDimensionProperty,
 } from "../../../domain/types";
 import {
   nodeShapeLabel,
@@ -40,16 +42,28 @@ import {
   styleReferenceCount,
 } from "../../../domain/selectors";
 import {
+  isValidStyleOptionValue,
+  normalizeStyleOptionValue,
+  sortedStyleDimensions,
+  styleDimensionProperties,
+  styleDimensionPropertyLabel,
+  styleDimensionReferenceCount,
+  styleOptionValueLabel,
+} from "../../../domain/style-dimensions";
+import {
+  applyNodeStylesBatch,
   createLayer,
   createLayersBatch,
   createNode,
   createNodesBatch,
   createNodeStyle,
   createPathway,
+  createStyleDimension,
   deleteLayerWithMigration,
   deleteNode,
   deleteNodeStyleWithReplacement,
   deletePathway,
+  deleteStyleDimension,
   duplicateNode,
   duplicateNodeStyle,
   getDeleteNodeImpact,
@@ -60,6 +74,7 @@ import {
   updateNode,
   updateNodeStyle,
   updatePathwayMetadata,
+  updateStyleDimension,
 } from "../../../editor/commands";
 import { parseBatchNames } from "../../../editor/batch-input";
 import { useEditorStore } from "../../../editor/store";
@@ -82,18 +97,22 @@ export function Inspector({
   const selection = useEditorStore((s) => s.selection);
   const draft = useEditorStore((s) => s.pathwayDraft);
   const tool = useEditorStore((s) => s.tool);
+  const multiSelectedNodeIds = useEditorStore((s) => s.multiSelectedNodeIds);
   const historyVersion = useEditorStore(
     (s) => `${s.history.past.length}:${s.history.future.length}`,
   );
   const key = `${createKind ?? (selection ? `${selection.kind}:${selection.id}` : "diagram")}:${diagram.updatedAt}:${diagram.revision}:${historyVersion}`;
   let content: React.ReactNode;
   if (tool === "connectPathway" && draft) content = <DraftPathwayForm />;
+  else if (!createKind && multiSelectedNodeIds.length > 1) content = <BatchNodeStyleForm nodeIds={multiSelectedNodeIds} />;
   else if (createKind === "layer")
     content = <LayerForm onDone={onCreateHandled} />;
   else if (createKind === "node")
     content = <NodeForm onDone={onCreateHandled} />;
   else if (createKind === "nodeStyle")
     content = <StyleForm onDone={onCreateHandled} />;
+  else if (createKind === "styleDimension")
+    content = <StyleDimensionForm onDone={onCreateHandled} />;
   else if (createKind === "pathway")
     content = <PathwayForm onDone={onCreateHandled} />;
   else if (createKind === "batch")
@@ -119,6 +138,13 @@ export function Inspector({
         mode={mode}
       />
     );
+  else if (selection?.kind === "styleDimension")
+    content = (
+      <StyleDimensionForm
+        dimension={diagram.styleDimensions.find((x) => x.id === selection.id)}
+        mode={mode}
+      />
+    );
   else if (selection?.kind === "pathway")
     content = (
       <PathwayForm
@@ -132,7 +158,7 @@ export function Inspector({
       <div className="inspector-heading">
         <div>
           <span className="eyebrow">Inspector</span>
-          <h2>{title(createKind, selection?.kind, tool)}</h2>
+          <h2>{multiSelectedNodeIds.length > 1 && !createKind ? `批量设置样式（${multiSelectedNodeIds.length}）` : title(createKind, selection?.kind, tool)}</h2>
         </div>
         <button
           className="panel-close"
@@ -157,13 +183,14 @@ function title(
   if (tool === "connectPathway") return "新建通路";
   if (create === "batch") return "批量添加";
   if (create)
-    return `新建${({ layer: "层级", node: "节点", nodeStyle: "样式", pathway: "通路" } as const)[create]}`;
+    return `新建${({ layer: "层级", node: "节点", nodeStyle: "基础样式", styleDimension: "样式维度", pathway: "通路", styleDimensionsBatch: "样式维度", batch: "对象" } as const)[create]}`;
   return (
     (
       {
         layer: "层级属性",
         node: "节点属性",
         nodeStyle: "样式属性",
+        styleDimension: "样式维度",
         pathway: "通路属性",
         diagram: "图概览",
       } as Record<string, string>
@@ -719,6 +746,7 @@ function NodeForm({
   const [styleId, setStyleId] = useState(
     node?.styleId ?? diagram.nodeStyles.find((x) => x.isDefault)?.id ?? "",
   );
+  const [styleAssignments, setStyleAssignments] = useState<Record<string, string>>(node?.styleAssignments ?? {});
   const [items, setItems] = useState(node?.decompositionItems.join("\n") ?? "");
   const [description, setDescription] = useState(node?.description ?? "");
   useEffect(() => {
@@ -740,6 +768,13 @@ function NodeForm({
             "未知"
           }
         />
+        {sortedStyleDimensions(diagram).map((dimension) => (
+          <Detail
+            key={dimension.id}
+            label={dimension.name}
+            value={dimension.options.find((option) => option.id === node.styleAssignments[dimension.id])?.name ?? "未设置"}
+          />
+        ))}
         <Detail
           label="拆解信息"
           value={
@@ -782,6 +817,7 @@ function NodeForm({
       name,
       layerId,
       styleId,
+      styleAssignments,
       decompositionItems: items.split("\n"),
       description,
       order: node?.order,
@@ -817,6 +853,7 @@ function NodeForm({
     setStyleId(
       node?.styleId ?? diagram.nodeStyles.find((x) => x.isDefault)?.id ?? "",
     );
+    setStyleAssignments(node?.styleAssignments ?? {});
     setItems(node?.decompositionItems.join("\n") ?? "");
     setDescription(node?.description ?? "");
   };
@@ -835,14 +872,37 @@ function NodeForm({
   return (
     <form className="property-form" onSubmit={submit}>
       <Field label="节点名称" required>
-        <input
+        <textarea
           autoFocus
           required
           maxLength={80}
+          rows={2}
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
+        <small>按 Enter 强制换行，最多两行；批量或 JSON 中也可使用 \n。</small>
       </Field>
+      {sortedStyleDimensions(diagram).map((dimension) => (
+        <Field key={dimension.id} label={`${dimension.name}（${styleDimensionPropertyLabel(dimension.property)}）`}>
+          <div className="style-option-picker" role="radiogroup" aria-label={dimension.name}>
+            <button
+              type="button"
+              aria-pressed={!styleAssignments[dimension.id]}
+              onClick={() => setStyleAssignments((current) => {
+                const next = { ...current }; delete next[dimension.id]; return next;
+              })}
+            >未设置</button>
+            {dimension.options.map((option) => (
+              <button
+                type="button"
+                key={option.id}
+                aria-pressed={styleAssignments[dimension.id] === option.id}
+                onClick={() => setStyleAssignments((current) => ({ ...current, [dimension.id]: option.id }))}
+              >{option.name}<small>{styleOptionValueLabel(dimension.property, option.value)}</small></button>
+            ))}
+          </div>
+        </Field>
+      ))}
       <Field label="所属叶子层级" required>
         <select
           required
@@ -931,6 +991,125 @@ function NodeForm({
       )}
     </form>
   );
+}
+
+function BatchNodeStyleForm({ nodeIds }: { nodeIds: string[] }) {
+  const diagram = useEditorStore((state) => state.diagram)!;
+  const execute = useEditorStore((state) => state.execute);
+  const [styleId, setStyleId] = useState("");
+  const [assignments, setAssignments] = useState<Record<string, string>>(Object.fromEntries(diagram.styleDimensions.map((item) => [item.id, "keep"])));
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault();
+    const patches: Record<string, string | null | undefined> = {};
+    Object.entries(assignments).forEach(([dimensionId, value]) => {
+      if (value === "keep") patches[dimensionId] = undefined;
+      else if (value === "clear") patches[dimensionId] = null;
+      else patches[dimensionId] = value;
+    });
+    execute(`批量设置 ${nodeIds.length} 个节点样式`, (current) => applyNodeStylesBatch(current, nodeIds, { styleId: styleId || undefined, assignments: patches }));
+  };
+  const reset = () => {
+    setStyleId("");
+    setAssignments(Object.fromEntries(diagram.styleDimensions.map((item) => [item.id, "keep"])));
+  };
+  return (
+    <form className="property-form" onSubmit={submit}>
+      <p className="inline-info">仅修改你明确选择的项目；“保持不变”不会覆盖各节点原有设置。</p>
+      <Field label="基础样式">
+        <select value={styleId} onChange={(event) => setStyleId(event.target.value)}>
+          <option value="">保持不变</option>
+          {diagram.nodeStyles.map((style) => <option key={style.id} value={style.id}>{style.name}</option>)}
+        </select>
+      </Field>
+      {sortedStyleDimensions(diagram).map((dimension) => (
+        <Field key={dimension.id} label={`${dimension.name}（${styleDimensionPropertyLabel(dimension.property)}）`}>
+          <select value={assignments[dimension.id] ?? "keep"} onChange={(event) => setAssignments((current) => ({ ...current, [dimension.id]: event.target.value }))}>
+            <option value="keep">保持不变</option>
+            <option value="clear">清除该维度</option>
+            {dimension.options.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+          </select>
+        </Field>
+      ))}
+      <FormFooter onCancel={reset} onConfirm={submit} />
+    </form>
+  );
+}
+
+function StyleDimensionForm({ dimension, mode = "edit", onDone }: { dimension?: StyleDimension; mode?: EditorMode; onDone?: () => void }) {
+  const diagram = useEditorStore((state) => state.diagram)!;
+  const execute = useEditorStore((state) => state.execute);
+  const select = useEditorStore((state) => state.select);
+  const dialog = useAppDialog();
+  const [name, setName] = useState(dimension?.name ?? "");
+  const [property, setProperty] = useState<StyleDimensionProperty>(dimension?.property ?? availableDimensionProperty(diagram));
+  const [options, setOptions] = useState(() => dimension?.options.map((option) => ({ ...option, value: styleOptionValueLabel(dimension.property, option.value) })) ?? [{ name: "", value: "", order: 10 }]);
+  const [bulk, setBulk] = useState("");
+  const readOnly = mode === "view";
+  const refs = dimension ? styleDimensionReferenceCount(diagram, dimension.id) : 0;
+  if (mode === "view" && dimension) return (
+    <div className="detail-stack">
+      <Detail label="维度名称" value={dimension.name} />
+      <Detail label="控制属性" value={styleDimensionPropertyLabel(dimension.property)} />
+      <Detail label="引用节点" value={`${refs} 个`} />
+      <div className="dimension-detail-options">{dimension.options.map((option) => <span key={option.id}><b>{option.name}</b><small>{styleOptionValueLabel(dimension.property, option.value)}</small></span>)}</div>
+    </div>
+  );
+  const valid = Boolean(name.trim()) && options.length > 0 && options.every((option) => option.name.trim() && isValidStyleOptionValue(property, option.value));
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault();
+    if (!valid || readOnly) return;
+    const before = new Set(diagram.styleDimensions.map((item) => item.id));
+    const input = { name, property, order: dimension?.order, options: options.map((option, index) => ({ ...option, value: normalizeStyleOptionValue(property, option.value), order: option.order ?? (index + 1) * 10 })) };
+    const ok = execute(dimension ? "更新样式维度" : "新建样式维度", (current) => dimension ? updateStyleDimension(current, dimension.id, input) : createStyleDimension(current, input));
+    if (!ok) return;
+    const created = useEditorStore.getState().diagram?.styleDimensions.find((item) => !before.has(item.id));
+    if (created) select({ kind: "styleDimension", id: created.id });
+    onDone?.();
+  };
+  const addBulk = () => {
+    const additions = bulk.replace(/\r\n?/g, "\n").split("\n").map((line) => line.split(/[\t,，]/).map((part) => part.trim())).filter(([optionName, value]) => optionName && value).map(([optionName, value], index) => ({ name: optionName!, value: value!, order: (options.length + index + 1) * 10 }));
+    if (additions.length) setOptions([...options, ...additions]);
+    setBulk("");
+  };
+  const remove = async () => {
+    if (!dimension || !await dialog.confirm({ title: "删除样式维度", message: `删除“${dimension.name}”？${refs} 个节点上的该维度设置也会移除。`, confirmLabel: "删除", destructive: true })) return;
+    if (execute("删除样式维度", (current) => deleteStyleDimension(current, dimension.id))) select({ kind: "diagram", id: diagram.id });
+  };
+  return (
+    <form className="property-form" onSubmit={submit}>
+      <Field label="维度名称" required><input autoFocus required maxLength={40} value={name} onChange={(event) => setName(event.target.value)} /></Field>
+      <Field label="控制属性" required>
+        <select value={property} onChange={(event) => setProperty(event.target.value as StyleDimensionProperty)}>
+          {styleDimensionProperties.map((item) => <option key={item.value} value={item.value} disabled={diagram.styleDimensions.some((existing) => existing.id !== dimension?.id && existing.property === item.value)}>{item.label}</option>)}
+        </select>
+        <small>每个视觉属性只能由一个维度控制，避免选项互相覆盖。</small>
+      </Field>
+      <fieldset className="dimension-option-editor"><legend>选项</legend>
+        {options.map((option, index) => <div className="dimension-option-row" key={("id" in option && option.id) || index}>
+          <input aria-label={`选项 ${index + 1} 名称`} placeholder="选项名称" value={option.name} onChange={(event) => setOptions(options.map((item, row) => row === index ? { ...item, name: event.target.value } : item))} />
+          <input aria-label={`选项 ${index + 1} 视觉值`} placeholder={dimensionValuePlaceholder(property)} value={option.value} onChange={(event) => setOptions(options.map((item, row) => row === index ? { ...item, value: event.target.value } : item))} />
+          <button type="button" aria-label={`删除选项 ${index + 1}`} disabled={options.length === 1} onClick={() => setOptions(options.filter((_, row) => row !== index))}>×</button>
+        </div>)}
+        <button type="button" className="wide-secondary" onClick={() => setOptions([...options, { name: "", value: "", order: (options.length + 1) * 10 }])}>＋ 添加选项</button>
+      </fieldset>
+      <details className="bulk-option-add"><summary>批量添加选项</summary><textarea rows={4} value={bulk} onChange={(event) => setBulk(event.target.value)} placeholder={"每行：选项名称<Tab>视觉值\n例如：外采\t腰圆"} /><button type="button" onClick={addBulk}>加入选项表</button></details>
+      {!valid && <p className="field-error">请填写维度名称，并确保每个选项都有有效名称和视觉值。</p>}
+      <FormFooter onCancel={() => onDone?.()} onConfirm={submit} disabled={!valid} />
+      {dimension && <DangerZone><p>当前被 {refs} 个节点引用。</p><button type="button" className="danger-button" onClick={() => void remove()}>删除维度</button></DangerZone>}
+    </form>
+  );
+}
+
+function availableDimensionProperty(diagram: Diagram): StyleDimensionProperty {
+  const used = new Set(diagram.styleDimensions.map((item) => item.property));
+  return styleDimensionProperties.find((item) => !used.has(item.value))?.value ?? "shape";
+}
+
+function dimensionValuePlaceholder(property: StyleDimensionProperty): string {
+  if (property === "shape") return "方框 / 腰圆 / 椭圆";
+  if (property === "borderStyle") return "实线 / 虚线 / 点线 / 点划线";
+  if (property === "borderWidth") return "1 / 2 / 3";
+  return "颜色名或 #RRGGBB";
 }
 
 const defaultStyle = {

@@ -8,6 +8,7 @@ import {
   shapeMinimumWidth,
 } from '../domain/node-shapes';
 import type { Diagram, DiagramNode, Layer, NodeStyle } from '../domain/types';
+import { resolveNodeStyle } from '../domain/style-dimensions';
 
 export interface Point { x: number; y: number }
 export interface Rect extends Point { width: number; height: number }
@@ -401,7 +402,7 @@ function contentDrivenNodeWidth(
 ): number {
   if (!adaptive) return maximumWidth;
   const style = nodeStyleFor(diagram, node);
-  const titleWidth = estimatedTextWidth(node.name, diagram.layout.fontSize);
+  const titleWidth = Math.max(...node.name.split('\n').map((line) => estimatedTextWidth(line, diagram.layout.fontSize)));
   const detailWidth = Math.max(
     0,
     ...node.decompositionItems.map((item) => estimatedTextWidth(item, diagram.layout.descriptionFontSize) + 12),
@@ -539,7 +540,7 @@ function estimatedCharacterWidth(character: string, fontSize: number): number {
 }
 
 function nodeStyleFor(diagram: Diagram, node: DiagramNode): NodeStyle {
-  return diagram.nodeStyles.find((style) => style.id === node.styleId) ?? diagram.nodeStyles[0]!;
+  return resolveNodeStyle(diagram, node);
 }
 
 function roundToGrid(value: number): number {

@@ -7,6 +7,8 @@ import {
 } from "../../../domain/selectors";
 import { sortStable } from "../../../domain/rules";
 import { pathwayEdgeCount } from "../../../domain/layer-order";
+import { singleLineNodeName } from "../../../domain/node-name";
+import { styleDimensionPropertyLabel, styleDimensionReferenceCount } from "../../../domain/style-dimensions";
 import { setPathwayVisibility } from "../../../editor/commands";
 import { useEditorStore } from "../../../editor/store";
 import type { CreateKind } from "../WorkspacePage";
@@ -103,12 +105,11 @@ export function ObjectPanel({ mode, onCreate, onClose }: Props) {
           </button>
         )}
         {mode === "edit" && tab === "styles" && (
-          <button
-            className="primary-button small"
-            onClick={() => onCreate("nodeStyle")}
-          >
-            ＋ 新增样式
-          </button>
+          <>
+            <button className="primary-button small" onClick={() => onCreate("styleDimension")}>＋ 维度</button>
+            <button onClick={() => onCreate("nodeStyle")}>＋ 基础样式</button>
+            <button className="batch-create-button" onClick={() => onCreate("styleDimensionsBatch")}>批量</button>
+          </>
         )}
       </div>
       <label className="panel-search">
@@ -204,6 +205,16 @@ export function ObjectPanel({ mode, onCreate, onClose }: Props) {
         )}
         {tab === "styles" && (
           <div className="object-list" role="list">
+            <div className="object-section-label">样式维度</div>
+            {diagram.styleDimensions
+              .filter((dimension) => !normalized || dimension.name.toLocaleLowerCase().includes(normalized) || dimension.options.some((option) => option.name.toLocaleLowerCase().includes(normalized)))
+              .map((dimension) => (
+                <button key={dimension.id} role="listitem" className={`object-row dimension-row ${selection?.kind === "styleDimension" && selection.id === dimension.id ? "selected" : ""}`} onClick={() => select({ kind: "styleDimension", id: dimension.id })}>
+                  <i>◆</i><span><b>{dimension.name}</b><small>{styleDimensionPropertyLabel(dimension.property)} · {dimension.options.length} 选项</small></span><em>{styleDimensionReferenceCount(diagram, dimension.id)}</em>
+                </button>
+              ))}
+            {!diagram.styleDimensions.length && <div className="object-section-empty">尚未创建维度</div>}
+            <div className="object-section-label">基础样式</div>
             {diagram.nodeStyles
               .filter(
                 (x) =>
@@ -259,7 +270,7 @@ function LayerBranch({
   const matches =
     !query ||
     layer.name.toLocaleLowerCase().includes(query) ||
-    nodes.some((x) => x.name.toLocaleLowerCase().includes(query));
+    nodes.some((x) => singleLineNodeName(x.name).toLocaleLowerCase().includes(query));
   if (
     !matches &&
     !children.some((child) => child.name.toLocaleLowerCase().includes(query))
@@ -320,7 +331,7 @@ function LayerBranch({
             .filter(
               (node) =>
                 !query ||
-                node.name.toLocaleLowerCase().includes(query) ||
+                singleLineNodeName(node.name).toLocaleLowerCase().includes(query) ||
                 layer.name.toLocaleLowerCase().includes(query),
             )
             .map((node) => (
@@ -334,7 +345,7 @@ function LayerBranch({
                 }
               >
                 <span aria-hidden="true">◇</span>
-                <span>{node.name}</span>
+                <span>{singleLineNodeName(node.name)}</span>
               </button>
             ))}
         </div>

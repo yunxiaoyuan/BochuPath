@@ -70,7 +70,7 @@ function createDiagram(count: number, direction: "TB" | "LR"): Diagram {
   diagram.nodes = Array.from({ length: count }, (_, index) => ({
     id: `stress-node-${index}`,
     layerId: "stress-layer",
-    styleId: "style_confirmed",
+    styleId: "style_confirmed", styleAssignments: {},
     name: `节点 ${index + 1}`,
     decompositionItems: [],
     order: (index + 1) * 10,

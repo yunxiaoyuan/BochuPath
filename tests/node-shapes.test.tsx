@@ -53,4 +53,11 @@ describe("node shape rendering", () => {
     expect(borderDashArray("dashDot")).toBe("8 4 1 4");
     expect(pathwayDashArray("dashDot")).toBe("8 4 1 4");
   });
+
+  it("renders a wide capsule with semicircular ends instead of an ellipse", () => {
+    const { container } = render(<NodeShape style={{ ...baseStyle, shape: "capsule" }} width={180} height={64} />);
+    const rect = container.querySelector(".node-shape-surface")!;
+    expect(Number(rect.getAttribute("rx"))).toBeLessThan(49);
+    expect(rect.getAttribute("ry")).toBe("49");
+  });
 });
