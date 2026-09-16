@@ -22,6 +22,26 @@ test("opens the seed diagram, switches modes and persists an edit", async ({
   ).toHaveCount(0);
 });
 
+test("view mode dedicates the workspace to the canvas and exits fullscreen with Escape", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/diagrams/diagram_demo/view");
+  const canvas = page.getByLabel("通路图画布");
+  await expect(canvas).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "对象面板" })).toHaveCount(0);
+  await expect(page.getByRole("complementary", { name: "属性面板" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "画布全屏" })).toBeVisible();
+  expect((await canvas.boundingBox())!.width).toBeGreaterThan(1400);
+  await page.getByRole("button", { name: "画布全屏" }).click();
+  await expect(page.locator(".workspace-shell")).toHaveClass(/canvas-fullscreen-mode/);
+  await expect(page.getByRole("banner", { name: "通路图顶部栏" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "退出全屏" })).toBeVisible();
+  expect((await canvas.boundingBox())!.height).toBeGreaterThan(820);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".workspace-shell")).not.toHaveClass(/canvas-fullscreen-mode/);
+  await expect(page.getByRole("banner", { name: "通路图顶部栏" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "画布全屏" })).toBeVisible();
+});
+
 test("fits the complete TB/LR canvas and renders directed arrows at 1440x900", async ({
   page,
 }) => {
